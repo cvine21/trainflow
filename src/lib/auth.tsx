@@ -15,7 +15,8 @@ interface AuthContextValue {
   loading: boolean
   session: Session | null
   user: User | null
-  signInWithEmail: (email: string) => Promise<void>
+  signIn: (email: string, password: string) => Promise<void>
+  signUp: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -76,14 +77,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [configured])
 
-  const signInWithEmail = useCallback(async (email: string) => {
+  const signIn = useCallback(async (email: string, password: string) => {
     const supabase = getSupabase()
     if (!supabase) throw new Error('Supabase не настроен')
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
-      options: { emailRedirectTo: `${window.location.origin}/account` },
+      password,
     })
     if (error) throw error
+  }, [])
+
+  const signUp = useCallback(async (email: string, password: string) => {
+    const supabase = getSupabase()
+    if (!supabase) throw new Error('Supabase не настроен')
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+    })
+    if (error) throw error
+    if (!data.session) {
+      throw new Error('Подтвердите email в письме или отключите Confirm email в Supabase')
+    }
   }, [])
 
   const signOut = useCallback(async () => {
@@ -101,10 +115,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       session,
       user: session?.user ?? null,
-      signInWithEmail,
+      signIn,
+      signUp,
       signOut,
     }),
-    [configured, loading, session, signInWithEmail, signOut],
+    [configured, loading, session, signIn, signUp, signOut],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
