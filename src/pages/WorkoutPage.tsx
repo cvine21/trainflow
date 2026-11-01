@@ -1,35 +1,48 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
+  AlertTriangle,
   Check,
   CheckCircle2,
   Copy,
+  Dumbbell,
   FileQuestion,
+  Layers,
+  LoaderCircle,
   MoreVertical,
   Pencil,
+  Plus,
   RotateCcw,
-  Timer,
   Trash2,
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { db, deleteWorkout, type Workout, type WorkoutExercise, type WorkoutSet } from '@/lib/db'
-import { formatDateLong, formatDuration, formatNumber, plural } from '@/lib/format'
+import { db, deleteWorkout, type Exercise, type Workout, type WorkoutBlock, type WorkoutExercise } from '@/lib/db'
+import { addDaysISO, formatDateLong, todayISO } from '@/lib/format'
+import { uid } from '@/lib/id'
+import { useWorkoutDraft, type SaveState } from '@/lib/useWorkoutDraft'
 import {
+  changeBlockFormat,
+  createWorkout,
   duplicateWorkout,
-  formatSet,
-  METRIC_LABELS,
-  sortMetrics,
-  workoutSetCount,
-  workoutTonnage,
+  findLastPerformance,
+  isCircuit,
+  newBlock,
+  newExercise,
+  type LastPerformance,
 } from '@/lib/workouts'
-import { NumberCell, PLACEHOLDER, SET_FIELD } from '@/components/ExerciseEditor'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { StatusBadge } from '@/components/StatusBadge'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { Chip } from '@/components/Chip'
+import { ExercisePicker } from '@/components/ExercisePicker'
+import { BlockCard } from '@/components/workout/BlockCard'
+import { BlockFormatSheet, type BlockParams } from '@/components/workout/BlockFormatSheet'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -39,18 +52,126 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { cn } from '@/lib/utils'
+
+const TITLE_SUGGESTIONS = ['Всё тело', 'Верх тела', 'Низ тела', 'Круговая', 'Кардио', 'Мобильность']
+
+type PickerTarget =
+  { kind: 'new' } | { kind: 'add'; blockId: string } | { kind: 'replace'; blockId: string; exerciseId: string }
+
+type FormatTarget = { kind: 'new' } | { kind: 'edit'; blockId: string }
+
+const PICKER_TITLE: Record<PickerTarget['kind'], string> = {
+  new: 'Добавить упражнение',
+  add: 'Упражнение в блок',
+  replace: 'Заменить упражнение',
+}
+
+function isEmptyDraft(w: Workout): boolean {
+  return w.status === 'planned' && !w.blocks.length && !w.title.trim() && !w.notes?.trim() && !w.time
+}
+
+function buildExercise(ex: Exercise, last: LastPerformance | null, circuit: boolean, setCount = 3): WorkoutExercise {
+  let sets = last?.exercise.sets.map((s) => ({ ...s, id: uid() }))
+  if (sets && circuit) sets = sets.slice(0, 1)
+  else if (sets?.length === 1 && last && isCircuit(last.format)) {
+    const [first] = sets
+    sets = Array.from({ length: setCount }, () => ({ ...first!, id: uid() }))
+  }
+  const item = newExercise(
+    { id: ex.id, name: ex.name, metrics: last?.exercise.metrics ?? ex.metrics },
+    sets,
+    circuit ? 1 : setCount,
+  )
+  item.restSec = circuit ? null : (last?.exercise.restSec ?? null)
+  return item
+}
+
+function applyPick(blocks: WorkoutBlock[], target: PickerTarget, ex: Exercise, last: LastPerformance | null) {
+  if (target.kind === 'new') return [...blocks, newBlock('sets', [buildExercise(ex, last, false)])]
+  return blocks.map((b) => {
+    if (b.id !== target.blockId) return b
+    const circuit = isCircuit(b.format)
+    if (target.kind === 'add') return { ...b, exercises: [...b.exercises, buildExercise(ex, last, circuit)] }
+    return {
+      ...b,
+      exercises: b.exercises.map((e) =>
+        e.id === target.exerciseId ? buildExercise(ex, last, circuit, e.sets.length || 3) : e,
+      ),
+    }
+  })
+}
+
+const canJoinSuperset = (b?: WorkoutBlock) => !!b && (b.format === 'sets' || b.format === 'superset')
+
+/** Creates an empty planned workout for the client and opens it. */
+export function NewWorkoutPage() {
+  const { clientId = '' } = useParams()
+  const navigate = useNavigate()
+  const started = useRef(false)
+
+  useEffect(() => {
+    if (started.current) return
+    started.current = true
+    void (async () => {
+      if (!(await db.clients.get(clientId))) {
+        navigate('/', { replace: true })
+        return
+      }
+      const id = await createWorkout(clientId)
+      navigate(`/workouts/${id}`, { replace: true, state: { fresh: true } })
+    })()
+  }, [clientId, navigate])
+
+  return (
+    <>
+      <PageHeader title="Новая тренировка" backTo={`/clients/${clientId}`} />
+      <div className="flex flex-col gap-3 p-4">
+        <Skeleton className="h-40 rounded-2xl" />
+        <Skeleton className="h-24 rounded-2xl" />
+      </div>
+    </>
+  )
+}
+
+/** The separate editor was merged into the workout screen; keeps old links working. */
+export function WorkoutEditRedirect() {
+  const { workoutId = '' } = useParams()
+  return <Navigate to={`/workouts/${workoutId}`} replace />
+}
+
+// Counts mounted screens per fresh draft so StrictMode's remount doesn't delete it.
+const openDrafts = new Map<string, number>()
 
 export function WorkoutPage() {
   const { workoutId = '' } = useParams()
   const navigate = useNavigate()
-  const workout = useLiveQuery(async () => (await db.workouts.get(workoutId)) ?? null, [workoutId])
+  const fresh = (useLocation().state as { fresh?: boolean } | null)?.fresh === true
+  const { workout, change, saveState, flush, discard } = useWorkoutDraft(workoutId)
   const client = useLiveQuery(
     async () => (workout ? ((await db.clients.get(workout.clientId)) ?? null) : undefined),
     [workout?.clientId],
   )
+  const [unlocked, setUnlocked] = useState(false)
+  const [picker, setPicker] = useState<PickerTarget | null>(null)
+  // Keeps the sheet title stable while it animates out.
+  const [pickerKind, setPickerKind] = useState<PickerTarget['kind']>('new')
+  if (picker && picker.kind !== pickerKind) setPickerKind(picker.kind)
+  const [formatTarget, setFormatTarget] = useState<FormatTarget | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [editingSetId, setEditingSetId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!fresh) return
+    openDrafts.set(workoutId, (openDrafts.get(workoutId) ?? 0) + 1)
+    return () => {
+      openDrafts.set(workoutId, (openDrafts.get(workoutId) ?? 1) - 1)
+      setTimeout(async () => {
+        if (openDrafts.get(workoutId)) return
+        openDrafts.delete(workoutId)
+        const w = await db.workouts.get(workoutId)
+        if (w && isEmptyDraft(w)) await deleteWorkout(w.id)
+      }, 0)
+    }
+  }, [fresh, workoutId])
 
   if (workout === null) {
     return (
@@ -83,17 +204,87 @@ export function WorkoutPage() {
     )
   }
 
-  const backTo = `/clients/${workout.clientId}?tab=${workout.status === 'completed' ? 'history' : 'plan'}`
-  const tonnage = workoutTonnage(workout)
-  const totalSets = workoutSetCount(workout)
   const isPlanned = workout.status === 'planned'
+  const editable = isPlanned || unlocked
+  const backTo = `/clients/${workout.clientId}?tab=${isPlanned ? 'plan' : 'history'}`
+  const blocks = workout.blocks
+
+  const setBlocks = (fn: (blocks: WorkoutBlock[]) => WorkoutBlock[]) => change((w) => ({ ...w, blocks: fn(w.blocks) }))
+  const updateBlock = (block: WorkoutBlock) => setBlocks((bs) => bs.map((b) => (b.id === block.id ? block : b)))
+  const removeBlock = (blockId: string) => {
+    const before = blocks
+    setBlocks((bs) => bs.filter((b) => b.id !== blockId))
+    toast('Удалено из тренировки', { action: { label: 'Вернуть', onClick: () => setBlocks(() => before) } })
+  }
+  const moveBlock = (i: number, dir: -1 | 1) =>
+    setBlocks((bs) => {
+      const j = i + dir
+      if (j < 0 || j >= bs.length) return bs
+      const next = [...bs]
+      ;[next[i], next[j]] = [next[j]!, next[i]!]
+      return next
+    })
+  const mergeNext = (i: number) =>
+    setBlocks((bs) => {
+      const a = bs[i]
+      const b = bs[i + 1]
+      if (!canJoinSuperset(a) || !canJoinSuperset(b)) return bs
+      const merged: WorkoutBlock = { ...a!, format: 'superset', exercises: [...a!.exercises, ...b!.exercises] }
+      return [...bs.slice(0, i), merged, ...bs.slice(i + 2)]
+    })
+  const splitExercise = (blockId: string, exerciseId: string) =>
+    setBlocks((bs) =>
+      bs.flatMap((b) => {
+        const ex = b.id === blockId ? b.exercises.find((e) => e.id === exerciseId) : undefined
+        if (!ex) return [b]
+        const rest = b.exercises.filter((e) => e.id !== exerciseId)
+        const remaining: WorkoutBlock = {
+          ...b,
+          format: b.format === 'superset' && rest.length === 1 ? 'sets' : b.format,
+          exercises: rest,
+        }
+        return [remaining, newBlock('sets', [ex])]
+      }),
+    )
+
+  async function handlePick(ex: Exercise) {
+    const target = picker
+    if (!target || !workout) return
+    const last = await findLastPerformance(workout.clientId, { exerciseId: ex.id, name: ex.name }, workout.id)
+    setBlocks((bs) => applyPick(bs, target, ex, last))
+  }
+
+  function handleFormat(params: BlockParams) {
+    const target = formatTarget
+    if (!target) return
+    if (target.kind === 'new') {
+      const block: WorkoutBlock = { ...newBlock(params.format), ...params }
+      setBlocks((bs) => [...bs, block])
+      setTimeout(() => setPicker({ kind: 'add', blockId: block.id }), 250)
+      return
+    }
+    setBlocks((bs) =>
+      changeBlockFormat(bs, target.blockId, params.format).map((b) =>
+        b.id === target.blockId ? { ...b, ...params } : b,
+      ),
+    )
+  }
+
+  function complete() {
+    change((w) => ({ ...w, status: 'completed' }))
+    setUnlocked(false)
+    toast.success('Тренировка проведена и сохранена в истории')
+  }
 
   async function repeat() {
     if (!workout) return
+    await flush()
     const id = await duplicateWorkout(workout)
     toast.success('Создана копия в плане — проверьте дату и веса')
-    navigate(`/workouts/${id}/edit`)
+    navigate(`/workouts/${id}`)
   }
+
+  const formatInitial = formatTarget?.kind === 'edit' ? blocks.find((b) => b.id === formatTarget.blockId) : undefined
 
   return (
     <>
@@ -102,141 +293,258 @@ export function WorkoutPage() {
         subtitle={client?.name}
         backTo={backTo}
         actions={
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-lg" aria-label="Действия" />}>
-              <MoreVertical className="size-5" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem className="h-10" onClick={() => navigate(`/workouts/${workout.id}/edit`)}>
-                <Pencil /> Редактировать
-              </DropdownMenuItem>
-              <DropdownMenuItem className="h-10" onClick={repeat}>
-                <Copy /> Повторить тренировку
-              </DropdownMenuItem>
-              {!isPlanned && (
-                <DropdownMenuItem className="h-10" onClick={() => setStatus(workout, 'planned')}>
-                  <RotateCcw /> Вернуть в план
+          <>
+            {editable && <SaveIndicator state={saveState} />}
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="ghost" size="icon-lg" aria-label="Действия" />}>
+                <MoreVertical className="size-5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem className="h-10" onClick={repeat}>
+                  <Copy /> Повторить тренировку
                 </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="h-10" variant="destructive" onClick={() => setConfirmDelete(true)}>
-                <Trash2 /> Удалить
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                {!isPlanned && (
+                  <DropdownMenuItem
+                    className="h-10"
+                    onClick={() => {
+                      change((w) => ({ ...w, status: 'planned' }))
+                      toast.success('Тренировка возвращена в план')
+                    }}
+                  >
+                    <RotateCcw /> Вернуть в план
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="h-10" variant="destructive" onClick={() => setConfirmDelete(true)}>
+                  <Trash2 /> Удалить
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
         }
       />
 
       <div className="flex flex-col gap-3 px-4 pt-4 pb-6">
-        <section className="rounded-2xl border border-border/70 bg-card p-4">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-sm font-medium first-letter:uppercase">{formatDateLong(workout.date)}</p>
-            <StatusBadge status={workout.status} date={workout.date} />
-          </div>
-          {client && (
-            <Link to={`/clients/${client.id}`} className="mt-0.5 inline-block text-sm text-primary">
-              {client.name}
-            </Link>
-          )}
-          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-            <StatTile
-              value={workout.exercises.length}
-              label={plural(workout.exercises.length, ['упражнение', 'упражнения', 'упражнений'])}
-            />
-            <StatTile value={totalSets} label={plural(totalSets, ['подход', 'подхода', 'подходов'])} />
-            <StatTile value={tonnage > 0 ? formatNumber(tonnage) : '—'} label="кг тоннаж" />
-          </div>
-        </section>
-
-        {workout.exercises.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-            В тренировке пока нет упражнений.{' '}
-            <Link to={`/workouts/${workout.id}/edit`} className="font-medium text-primary">
-              Добавить
-            </Link>
+        {client?.health && (
+          <div className="flex gap-2.5 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+            <p className="whitespace-pre-wrap">{client.health}</p>
           </div>
         )}
 
-        {workout.exercises.map((ex, i) => (
-          <section key={ex.id} className="rounded-2xl border border-border/70 bg-card">
-            <div className="flex items-center gap-2.5 px-4 pt-3 pb-2">
-              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground">
-                {i + 1}
-              </span>
-              <h3 className="min-w-0 flex-1 font-semibold">{ex.name}</h3>
-              {ex.restSec != null && ex.restSec > 0 && (
-                <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-                  <Timer className="size-3.5" /> {formatDuration(ex.restSec)}
-                </span>
-              )}
+        {editable ? (
+          <section className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card p-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="title">Название</Label>
+              <Input
+                id="title"
+                value={workout.title}
+                onChange={(e) => change((w) => ({ ...w, title: e.target.value }))}
+                placeholder="Например, Низ тела + кор"
+                className="h-11"
+              />
+              <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pt-1 [scrollbar-width:none]">
+                {TITLE_SUGGESTIONS.map((t) => (
+                  <Chip
+                    key={t}
+                    active={workout.title === t}
+                    onClick={() => change((w) => ({ ...w, title: t }))}
+                    className="h-7 px-2.5 text-xs"
+                  >
+                    {t}
+                  </Chip>
+                ))}
+              </div>
             </div>
-            <ul className="px-2 pb-2">
-              {ex.sets.map((s, j) => (
-                <li key={s.id}>
-                  {editingSetId === s.id ? (
-                    <SetEditForm
-                      exercise={ex}
-                      set={s}
-                      index={j}
-                      onCancel={() => setEditingSetId(null)}
-                      onSave={async (next) => {
-                        await saveSet(workout.id, ex.id, next)
-                        setEditingSetId(null)
-                      }}
-                    />
-                  ) : (
-                    <div className="flex items-center gap-1 rounded-xl pl-2 active:bg-muted">
-                      <button
-                        type="button"
-                        onClick={() => setEditingSetId(s.id)}
-                        className="flex min-w-0 flex-1 items-center gap-3 py-2 text-left"
-                      >
-                        <span className="w-14 shrink-0 text-xs text-muted-foreground">Подход {j + 1}</span>
-                        <span className="flex-1 text-sm font-medium tabular-nums">{formatSet(s, ex.metrics)}</span>
-                        <Pencil className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeSet(workout.id, ex.id, s, j)}
-                        className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-destructive/10 active:text-destructive"
-                        aria-label={`Удалить подход ${j + 1}`}
-                      >
-                        <Trash2 className="size-4" />
-                      </button>
-                    </div>
+            <div className="grid grid-cols-[minmax(0,1fr)_7.5rem] gap-2">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="date">Дата</Label>
+                <Input
+                  id="date"
+                  type="date"
+                  value={workout.date}
+                  onChange={(e) => e.target.value && change((w) => ({ ...w, date: e.target.value }))}
+                  className="h-11"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="time">Время</Label>
+                <div className="relative">
+                  <Input
+                    id="time"
+                    type="time"
+                    value={workout.time ?? ''}
+                    onChange={(e) => change((w) => ({ ...w, time: e.target.value }))}
+                    className="h-11"
+                  />
+                  {workout.time && (
+                    <button
+                      type="button"
+                      onClick={() => change((w) => ({ ...w, time: '' }))}
+                      className="absolute top-1/2 right-1 flex size-7 -translate-y-1/2 items-center justify-center rounded-full bg-card text-muted-foreground active:bg-muted"
+                      aria-label="Убрать время"
+                    >
+                      <X className="size-4" />
+                    </button>
                   )}
-                </li>
-              ))}
-              {ex.sets.length === 0 && <li className="px-2 py-2 text-sm text-muted-foreground">Подходы не указаны</li>}
-            </ul>
-            {ex.note && (
-              <p className="mx-4 mb-3 rounded-xl bg-muted/70 px-3 py-2 text-sm whitespace-pre-wrap text-muted-foreground">
-                {ex.note}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-1.5">
+              <Chip
+                active={workout.date === todayISO()}
+                onClick={() => change((w) => ({ ...w, date: todayISO() }))}
+                className="h-8 text-xs"
+              >
+                Сегодня
+              </Chip>
+              <Chip
+                active={workout.date === addDaysISO(todayISO(), 1)}
+                onClick={() => change((w) => ({ ...w, date: addDaysISO(todayISO(), 1) }))}
+                className="h-8 text-xs"
+              >
+                Завтра
+              </Chip>
+            </div>
+          </section>
+        ) : (
+          <section className="rounded-2xl border border-border/70 bg-card p-4">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-sm font-medium first-letter:uppercase">
+                {formatDateLong(workout.date)}
+                {workout.time && `, ${workout.time}`}
               </p>
+              <StatusBadge status={workout.status} date={workout.date} />
+            </div>
+            {client && (
+              <Link to={`/clients/${client.id}`} className="mt-0.5 inline-block text-sm text-primary">
+                {client.name}
+              </Link>
             )}
           </section>
+        )}
+
+        {blocks.length === 0 &&
+          (editable ? (
+            <button
+              type="button"
+              onClick={() => setPicker({ kind: 'new' })}
+              className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-border px-4 py-8 text-center active:bg-muted/60"
+            >
+              <Dumbbell className="size-7 text-primary" />
+              <span className="font-medium">Добавьте первое упражнение</span>
+              <span className="text-sm text-muted-foreground">
+                Подходы и веса подставятся из прошлой тренировки клиента
+              </span>
+            </button>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+              В тренировке нет упражнений
+            </div>
+          ))}
+
+        {blocks.map((block, i) => (
+          <BlockCard
+            key={block.id}
+            block={block}
+            index={i}
+            total={blocks.length}
+            canMergeNext={canJoinSuperset(block) && canJoinSuperset(blocks[i + 1])}
+            editable={editable}
+            onChange={updateBlock}
+            onRemove={() => removeBlock(block.id)}
+            onMove={(dir) => moveBlock(i, dir)}
+            onMergeNext={() => mergeNext(i)}
+            onEditFormat={() => setFormatTarget({ kind: 'edit', blockId: block.id })}
+            onAddExercise={() => setPicker({ kind: 'add', blockId: block.id })}
+            onReplaceExercise={(exerciseId) => setPicker({ kind: 'replace', blockId: block.id, exerciseId })}
+            onSplitExercise={(exerciseId) => splitExercise(block.id, exerciseId)}
+          />
         ))}
 
-        <NotesEditor key={workout.id} workoutId={workout.id} initial={workout.notes ?? ''} />
+        {editable && blocks.length > 0 && (
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 border-dashed"
+              onClick={() => setPicker({ kind: 'new' })}
+            >
+              <Plus /> Упражнение
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 border-dashed"
+              onClick={() => setFormatTarget({ kind: 'new' })}
+            >
+              <Layers /> Блок
+            </Button>
+          </div>
+        )}
+        {editable && blocks.length === 0 && (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 border-dashed"
+            onClick={() => setFormatTarget({ kind: 'new' })}
+          >
+            <Layers /> Суперсет, круг, EMOM, AMRAP…
+          </Button>
+        )}
+
+        <section className="mt-1 flex flex-col gap-1.5">
+          <Label htmlFor="notes">Заметки тренера</Label>
+          <Textarea
+            id="notes"
+            value={workout.notes ?? ''}
+            onChange={(e) => change((w) => ({ ...w, notes: e.target.value }))}
+            placeholder="Самочувствие, техника, что поменять в следующий раз"
+            rows={3}
+            className="bg-card"
+          />
+        </section>
       </div>
 
-      <div className="pb-safe sticky bottom-0 mt-auto flex gap-2 border-t border-border/60 bg-background/90 px-4 pt-3 backdrop-blur-md">
-        <Link
-          to={`/workouts/${workout.id}/edit`}
-          className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'mb-3 h-12 flex-1 text-base')}
-        >
-          <Pencil /> Изменить
-        </Link>
+      <div className="pb-safe sticky bottom-0 z-20 mt-auto flex gap-2 border-t border-border/60 bg-background/90 px-4 pt-3 backdrop-blur-md">
         {isPlanned ? (
-          <Button className="mb-3 h-12 flex-[1.4] text-base" onClick={() => setStatus(workout, 'completed')}>
+          <Button className="mb-3 h-12 flex-1 text-base" onClick={complete}>
             <CheckCircle2 /> Провести
           </Button>
         ) : (
-          <Button className="mb-3 h-12 flex-[1.4] text-base" onClick={repeat}>
-            <Copy /> Повторить
-          </Button>
+          <>
+            <Button variant="outline" className="mb-3 h-12 flex-1 text-base" onClick={() => setUnlocked((v) => !v)}>
+              {unlocked ? (
+                <>
+                  <Check /> Готово
+                </>
+              ) : (
+                <>
+                  <Pencil /> Изменить
+                </>
+              )}
+            </Button>
+            <Button className="mb-3 h-12 flex-[1.4] text-base" onClick={repeat}>
+              <Copy /> Повторить
+            </Button>
+          </>
         )}
       </div>
+
+      <ExercisePicker
+        open={picker !== null}
+        onOpenChange={(open) => !open && setPicker(null)}
+        title={PICKER_TITLE[pickerKind]}
+        onPick={handlePick}
+      />
+
+      <BlockFormatSheet
+        open={formatTarget !== null}
+        onOpenChange={(open) => !open && setFormatTarget(null)}
+        mode={formatTarget?.kind === 'new' ? 'new' : 'edit'}
+        initial={formatInitial}
+        onSave={handleFormat}
+      />
 
       <ConfirmDialog
         open={confirmDelete}
@@ -244,6 +552,7 @@ export function WorkoutPage() {
         title="Удалить тренировку?"
         description="Тренировка и заметки к ней будут удалены без возможности восстановления."
         onConfirm={async () => {
+          discard()
           await deleteWorkout(workout.id)
           toast.success('Тренировка удалена')
           navigate(backTo, { replace: true })
@@ -253,154 +562,16 @@ export function WorkoutPage() {
   )
 }
 
-// Reads the workout inside the transaction: the rendered copy may lag behind a just-saved edit.
-function updateSets(workoutId: string, exerciseId: string, fn: (sets: WorkoutSet[]) => WorkoutSet[]) {
-  return db.transaction('rw', db.workouts, async () => {
-    const workout = await db.workouts.get(workoutId)
-    if (!workout) return
-    const exercises = workout.exercises.map((ex) => (ex.id !== exerciseId ? ex : { ...ex, sets: fn(ex.sets) }))
-    await db.workouts.update(workoutId, { exercises, updatedAt: Date.now() })
-  })
-}
-
-async function saveSet(workoutId: string, exerciseId: string, set: WorkoutSet) {
-  await updateSets(workoutId, exerciseId, (sets) => sets.map((s) => (s.id === set.id ? set : s)))
-}
-
-async function removeSet(workoutId: string, exerciseId: string, set: WorkoutSet, index: number) {
-  await updateSets(workoutId, exerciseId, (sets) => sets.filter((s) => s.id !== set.id))
-  toast('Подход удалён', {
-    action: {
-      label: 'Вернуть',
-      onClick: () => updateSets(workoutId, exerciseId, (sets) => [...sets.slice(0, index), set, ...sets.slice(index)]),
-    },
-  })
-}
-
-function SetEditForm({
-  exercise,
-  set,
-  index,
-  onSave,
-  onCancel,
-}: {
-  exercise: WorkoutExercise
-  set: WorkoutSet
-  index: number
-  onSave: (set: WorkoutSet) => void
-  onCancel: () => void
-}) {
-  const [draft, setDraft] = useState(set)
-  const metrics = sortMetrics(exercise.metrics)
-
+function SaveIndicator({ state }: { state: SaveState }) {
+  if (state === 'idle') return null
   return (
-    <form
-      className="flex items-center gap-1.5 rounded-xl bg-muted/60 py-1.5 pl-2"
-      onSubmit={(e) => {
-        e.preventDefault()
-        onSave(draft)
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') onCancel()
-      }}
-    >
-      <span className="w-14 shrink-0 text-xs text-muted-foreground">Подход {index + 1}</span>
-      <div
-        className="grid min-w-0 flex-1 gap-1.5"
-        style={{ gridTemplateColumns: `repeat(${metrics.length}, minmax(0, 1fr))` }}
-      >
-        {metrics.map((m, k) => (
-          <NumberCell
-            key={m}
-            value={(draft[SET_FIELD[m]] as number | null | undefined) ?? null}
-            onChange={(v) => setDraft((d) => ({ ...d, [SET_FIELD[m]]: v }))}
-            placeholder={PLACEHOLDER[m]}
-            decimal={m === 'weight' || m === 'distance'}
-            duration={m === 'time'}
-            autoFocus={k === 0}
-            label={`${METRIC_LABELS[m].full}, подход ${index + 1}`}
-          />
-        ))}
-      </div>
-      <button
-        type="submit"
-        className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
-        aria-label="Сохранить подход"
-      >
-        <Check className="size-4" strokeWidth={3} />
-      </button>
-      <button
-        type="button"
-        onClick={onCancel}
-        className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-muted"
-        aria-label="Отменить"
-      >
-        <X className="size-4" />
-      </button>
-    </form>
-  )
-}
-
-async function setStatus(workout: Workout, status: Workout['status']) {
-  await db.workouts.update(workout.id, { status, updatedAt: Date.now() })
-  toast.success(status === 'completed' ? 'Тренировка перенесена в историю' : 'Тренировка возвращена в план')
-}
-
-function StatTile({ value, label }: { value: number | string; label: string }) {
-  return (
-    <div className="rounded-xl bg-muted/60 py-2">
-      <div className="text-lg leading-6 font-semibold tabular-nums">{value}</div>
-      <div className="text-[11px] text-muted-foreground">{label}</div>
-    </div>
-  )
-}
-
-function NotesEditor({ workoutId, initial }: { workoutId: string; initial: string }) {
-  const [value, setValue] = useState(initial)
-  const [state, setState] = useState<'idle' | 'pending' | 'saved'>('idle')
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const latest = useRef(value)
-
-  useEffect(() => {
-    latest.current = value
-  }, [value])
-
-  useEffect(
-    () => () => {
-      if (timer.current) {
-        clearTimeout(timer.current)
-        void db.workouts.update(workoutId, { notes: latest.current, updatedAt: Date.now() })
-      }
-    },
-    [workoutId],
-  )
-
-  function schedule(next: string) {
-    setValue(next)
-    setState('pending')
-    if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(async () => {
-      timer.current = undefined
-      await db.workouts.update(workoutId, { notes: next, updatedAt: Date.now() })
-      setState('saved')
-    }, 600)
-  }
-
-  return (
-    <section className="rounded-2xl border border-border/70 bg-card p-4">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="font-semibold">Заметки тренера</h3>
-        <span className="text-xs text-muted-foreground">
-          {state === 'pending' ? 'Сохраняем…' : state === 'saved' ? 'Сохранено' : ''}
-        </span>
-      </div>
-      <Textarea
-        value={value}
-        onChange={(e) => schedule(e.target.value)}
-        placeholder="Как прошла тренировка: самочувствие, техника, что поменять в следующий раз"
-        rows={4}
-        className="bg-background"
-      />
-    </section>
+    <span className="mr-1 inline-flex items-center gap-1 text-xs text-muted-foreground" aria-live="polite">
+      {state === 'saving' ? (
+        <LoaderCircle className="size-3.5 animate-spin" />
+      ) : (
+        <Check className="size-3.5 text-emerald-600" />
+      )}
+      {state === 'saving' ? 'Сохраняем' : 'Сохранено'}
+    </span>
   )
 }

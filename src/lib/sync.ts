@@ -1,16 +1,22 @@
 import type { Session, SupabaseClient } from '@supabase/supabase-js'
+import type { EntityTable } from 'dexie'
 import {
   db,
+  legacyBlocks,
   type Client,
   type Exercise,
+  type Measurement,
   type Metric,
   type SyncEntity,
   type Workout,
   type WorkoutStatus,
 } from '@/lib/db'
+import { normalizeLocalData } from '@/lib/migrations'
+import { allExercises } from '@/lib/workouts'
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase'
 
 const LAST_SYNC_KEY = 'coach-journal:lastSyncedAt'
+const SCHEMA_MIGRATION = 'supabase/migrations/20261101140000_blocks_time_measurements.sql'
 
 export type SyncStatus = 'idle' | 'syncing' | 'ok' | 'error' | 'offline' | 'unconfigured'
 
@@ -21,6 +27,7 @@ export interface SyncResult {
 }
 
 type Listener = (status: SyncStatus, error?: string) => void
+type Row = Record<string, unknown>
 
 let syncing = false
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -55,18 +62,84 @@ export function getSyncError(): string | undefined {
   return lastError
 }
 
-function msToIso(ms: number | null | undefined): string | null {
-  if (ms == null) return null
-  return new Date(ms).toISOString()
+/** Missing table/column errors mean the Supabase schema predates the app. */
+function check(error: { message: string; code?: string } | null): void {
+  if (!error) return
+  if (['42P01', '42703', 'PGRST204', 'PGRST205'].includes(error.code ?? '')) {
+    throw new Error(`Обновите схему Supabase: выполните ${SCHEMA_MIGRATION}`)
+  }
+  throw error instanceof Error ? error : new Error(error.message)
 }
 
-/** Supabase stores timestamptz optionally; we use bigint ms in schema. */
-function rowUpdatedAt(row: { updated_at: number | string }): number {
-  return typeof row.updated_at === 'number' ? row.updated_at : Date.parse(String(row.updated_at))
+const num = (v: unknown) => (v == null ? null : Number(v))
+
+interface Entity {
+  name: SyncEntity
+  push(supabase: SupabaseClient, userId: string, since: number): Promise<number>
+  applyRemote(row: Row): Promise<'pulled' | 'deleted' | 'skipped'>
+  fetchAll(supabase: SupabaseClient, userId: string): Promise<Row[]>
+  /** Must run inside a transaction that includes the table. */
+  replaceAll(rows: Row[]): Promise<void>
+  stub(id: string, userId: string, deletedAt: number): Row
+  table: EntityTable<{ id: string }, 'id'>
 }
 
-function clientToRow(c: Client, userId: string) {
+function defineEntity<T extends { id: string; updatedAt: number }>(spec: {
+  name: SyncEntity
+  table: EntityTable<T, 'id'>
+  toRow: (item: T, userId: string) => Row
+  fromRow: (row: Row) => T
+  stub: (id: string) => Row
+}): Entity {
+  const { name, table, toRow, fromRow } = spec
   return {
+    name,
+    table: table as unknown as EntityTable<{ id: string }, 'id'>,
+    async push(supabase, userId, since) {
+      const rows = (await table.filter((x) => x.updatedAt > since).toArray()).map((x) => toRow(x, userId))
+      if (!rows.length) return 0
+      const { error } = await supabase.from(name).upsert(rows, { onConflict: 'id' })
+      check(error)
+      return rows.length
+    },
+    async applyRemote(row) {
+      const id = String(row.id)
+      const store = table as unknown as EntityTable<{ id: string }, 'id'>
+      if (row.deleted_at) {
+        await store.delete(id)
+        await db.tombstones.delete(id)
+        return 'deleted'
+      }
+      const remote = fromRow(row)
+      const local = (await store.get(id)) as T | undefined
+      if (local && remote.updatedAt < local.updatedAt) return 'skipped'
+      await table.put(remote)
+      return 'pulled'
+    },
+    async fetchAll(supabase, userId) {
+      const { data, error } = await supabase.from(name).select('*').eq('user_id', userId).is('deleted_at', null)
+      check(error)
+      return (data ?? []) as Row[]
+    },
+    async replaceAll(rows) {
+      await table.clear()
+      if (rows.length) await table.bulkPut(rows.map(fromRow))
+    },
+    stub: (id, userId, deletedAt) => ({
+      id,
+      user_id: userId,
+      created_at: deletedAt,
+      ...spec.stub(id),
+      updated_at: deletedAt,
+      deleted_at: deletedAt,
+    }),
+  }
+}
+
+const clients = defineEntity<Client>({
+  name: 'clients',
+  table: db.clients,
+  toRow: (c, userId) => ({
     id: c.id,
     user_id: userId,
     name: c.name,
@@ -79,58 +152,62 @@ function clientToRow(c: Client, userId: string) {
     notes: c.notes ?? null,
     created_at: c.createdAt,
     updated_at: c.updatedAt,
-    deleted_at: null as number | null,
-  }
-}
-
-function rowToClient(row: Record<string, unknown>): Client {
-  return {
+    deleted_at: null,
+  }),
+  fromRow: (row) => ({
     id: String(row.id),
     name: String(row.name ?? ''),
     phone: (row.phone as string) || undefined,
     birthDate: (row.birth_date as string) || undefined,
-    heightCm: (row.height_cm as number | null) ?? null,
-    weightKg: (row.weight_kg as number | null) ?? null,
+    heightCm: num(row.height_cm),
+    weightKg: num(row.weight_kg),
     goal: (row.goal as string) || undefined,
     health: (row.health as string) || undefined,
     notes: (row.notes as string) || undefined,
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
-  }
-}
+  }),
+  stub: () => ({ name: '(удалено)' }),
+})
 
-function workoutToRow(w: Workout, userId: string) {
-  return {
+const workouts = defineEntity<Workout>({
+  name: 'workouts',
+  table: db.workouts,
+  toRow: (w, userId) => ({
     id: w.id,
     user_id: userId,
     client_id: w.clientId,
     date: w.date,
+    time: w.time || null,
     title: w.title,
     status: w.status,
-    exercises: w.exercises,
+    blocks: w.blocks,
+    // Flat copy keeps older app versions readable.
+    exercises: allExercises(w),
     notes: w.notes ?? null,
     created_at: w.createdAt,
     updated_at: w.updatedAt,
-    deleted_at: null as number | null,
-  }
-}
-
-function rowToWorkout(row: Record<string, unknown>): Workout {
-  return {
+    deleted_at: null,
+  }),
+  fromRow: (row) => ({
     id: String(row.id),
     clientId: String(row.client_id),
     date: String(row.date),
+    time: (row.time as string) || undefined,
     title: String(row.title ?? ''),
     status: row.status as WorkoutStatus,
-    exercises: (row.exercises as Workout['exercises']) ?? [],
+    blocks: Array.isArray(row.blocks) ? (row.blocks as Workout['blocks']) : legacyBlocks(row.exercises),
     notes: (row.notes as string) || undefined,
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
-  }
-}
+  }),
+  stub: () => ({ client_id: '', date: '1970-01-01', title: '', status: 'planned', exercises: [] }),
+})
 
-function exerciseToRow(e: Exercise, userId: string) {
-  return {
+const exercises = defineEntity<Exercise>({
+  name: 'exercises',
+  table: db.exercises,
+  toRow: (e, userId) => ({
     id: e.id,
     user_id: userId,
     name: e.name,
@@ -138,51 +215,65 @@ function exerciseToRow(e: Exercise, userId: string) {
     metrics: e.metrics,
     created_at: e.createdAt,
     updated_at: e.updatedAt,
-    deleted_at: null as number | null,
-  }
-}
-
-function rowToExercise(row: Record<string, unknown>): Exercise {
-  return {
+    deleted_at: null,
+  }),
+  fromRow: (row) => ({
     id: String(row.id),
     name: String(row.name ?? ''),
     category: String(row.category ?? 'Другое'),
     metrics: (row.metrics as Metric[]) ?? [],
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
-  }
-}
+  }),
+  stub: () => ({ name: '(удалено)', category: 'Другое', metrics: [] }),
+})
 
-async function pushTable(supabase: SupabaseClient, userId: string, table: SyncEntity, since: number): Promise<number> {
-  let pushed = 0
-  if (table === 'clients') {
-    const rows = (await db.clients.filter((c) => c.updatedAt > since).toArray()).map((c) => clientToRow(c, userId))
-    if (rows.length) {
-      const { error } = await supabase.from('clients').upsert(rows, { onConflict: 'id' })
-      if (error) throw error
-      pushed += rows.length
-    }
-  } else if (table === 'workouts') {
-    const rows = (await db.workouts.filter((w) => w.updatedAt > since).toArray()).map((w) => workoutToRow(w, userId))
-    if (rows.length) {
-      const { error } = await supabase.from('workouts').upsert(rows, { onConflict: 'id' })
-      if (error) throw error
-      pushed += rows.length
-    }
-  } else {
-    const rows = (await db.exercises.filter((e) => e.updatedAt > since).toArray()).map((e) => exerciseToRow(e, userId))
-    if (rows.length) {
-      const { error } = await supabase.from('exercises').upsert(rows, { onConflict: 'id' })
-      if (error) throw error
-      pushed += rows.length
-    }
-  }
-  return pushed
-}
+const measurements = defineEntity<Measurement>({
+  name: 'measurements',
+  table: db.measurements,
+  toRow: (m, userId) => ({
+    id: m.id,
+    user_id: userId,
+    client_id: m.clientId,
+    date: m.date,
+    weight_kg: m.weightKg ?? null,
+    height_cm: m.heightCm ?? null,
+    chest_cm: m.chestCm ?? null,
+    waist_cm: m.waistCm ?? null,
+    hips_cm: m.hipsCm ?? null,
+    thigh_cm: m.thighCm ?? null,
+    arm_cm: m.armCm ?? null,
+    body_fat_pct: m.bodyFatPct ?? null,
+    note: m.note ?? null,
+    created_at: m.createdAt,
+    updated_at: m.updatedAt,
+    deleted_at: null,
+  }),
+  fromRow: (row) => ({
+    id: String(row.id),
+    clientId: String(row.client_id),
+    date: String(row.date),
+    weightKg: num(row.weight_kg),
+    heightCm: num(row.height_cm),
+    chestCm: num(row.chest_cm),
+    waistCm: num(row.waist_cm),
+    hipsCm: num(row.hips_cm),
+    thighCm: num(row.thigh_cm),
+    armCm: num(row.arm_cm),
+    bodyFatPct: num(row.body_fat_pct),
+    note: (row.note as string) || undefined,
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  }),
+  stub: () => ({ client_id: '', date: '1970-01-01' }),
+})
+
+// Measurements go first: on an outdated schema the sync fails before anything is half-pushed.
+const ENTITIES: Entity[] = [measurements, clients, workouts, exercises]
+const BY_NAME = Object.fromEntries(ENTITIES.map((e) => [e.name, e])) as Record<SyncEntity, Entity>
 
 async function pushTombstones(supabase: SupabaseClient, userId: string): Promise<number> {
   const stones = await db.tombstones.toArray()
-  if (!stones.length) return 0
   let pushed = 0
   for (const stone of stones) {
     const patch = { updated_at: stone.deletedAt, deleted_at: stone.deletedAt }
@@ -192,51 +283,13 @@ async function pushTombstones(supabase: SupabaseClient, userId: string): Promise
       .eq('id', stone.id)
       .eq('user_id', userId)
       .select('id')
-    if (error) throw error
+    check(error)
     if (!data?.length) {
       // Never synced — insert a soft-deleted stub so other devices learn about the removal.
-      let upsertError
-      if (stone.entity === 'clients') {
-        ;({ error: upsertError } = await supabase.from('clients').upsert(
-          {
-            id: stone.id,
-            user_id: userId,
-            name: '(удалено)',
-            created_at: stone.deletedAt,
-            ...patch,
-          },
-          { onConflict: 'id' },
-        ))
-      } else if (stone.entity === 'workouts') {
-        ;({ error: upsertError } = await supabase.from('workouts').upsert(
-          {
-            id: stone.id,
-            user_id: userId,
-            client_id: '',
-            date: '1970-01-01',
-            title: '',
-            status: 'planned',
-            exercises: [],
-            created_at: stone.deletedAt,
-            ...patch,
-          },
-          { onConflict: 'id' },
-        ))
-      } else {
-        ;({ error: upsertError } = await supabase.from('exercises').upsert(
-          {
-            id: stone.id,
-            user_id: userId,
-            name: '(удалено)',
-            category: 'Другое',
-            metrics: [],
-            created_at: stone.deletedAt,
-            ...patch,
-          },
-          { onConflict: 'id' },
-        ))
-      }
-      if (upsertError) throw upsertError
+      const { error: upsertError } = await supabase
+        .from(stone.entity)
+        .upsert(BY_NAME[stone.entity].stub(stone.id, userId, stone.deletedAt), { onConflict: 'id' })
+      check(upsertError)
     }
     await db.tombstones.delete(stone.id)
     pushed += 1
@@ -244,51 +297,34 @@ async function pushTombstones(supabase: SupabaseClient, userId: string): Promise
   return pushed
 }
 
-async function pullTable(
-  supabase: SupabaseClient,
-  table: SyncEntity,
-  since: number,
-): Promise<{ pulled: number; deleted: number }> {
-  const { data, error } = await supabase.from(table).select('*').gt('updated_at', since)
-  if (error) throw error
+async function pushPending(supabase: SupabaseClient, userId: string, since: number): Promise<number> {
+  let pushed = await pushTombstones(supabase, userId)
+  for (const e of ENTITIES) pushed += await e.push(supabase, userId, since)
+  return pushed
+}
+
+async function pullEntity(supabase: SupabaseClient, e: Entity, since: number) {
+  const { data, error } = await supabase.from(e.name).select('*').gt('updated_at', since)
+  check(error)
   let pulled = 0
   let deleted = 0
-  for (const raw of data ?? []) {
-    const row = raw as Record<string, unknown>
-    const id = String(row.id)
-    const deletedAt = row.deleted_at as number | null
-    if (deletedAt) {
-      if (table === 'clients') await db.clients.delete(id)
-      else if (table === 'workouts') await db.workouts.delete(id)
-      else await db.exercises.delete(id)
-      await db.tombstones.delete(id)
-      deleted += 1
-      continue
-    }
-    if (table === 'clients') {
-      const local = await db.clients.get(id)
-      const remote = rowToClient(row)
-      if (!local || remote.updatedAt >= local.updatedAt) {
-        await db.clients.put(remote)
-        pulled += 1
-      }
-    } else if (table === 'workouts') {
-      const local = await db.workouts.get(id)
-      const remote = rowToWorkout(row)
-      if (!local || remote.updatedAt >= local.updatedAt) {
-        await db.workouts.put(remote)
-        pulled += 1
-      }
-    } else {
-      const local = await db.exercises.get(id)
-      const remote = rowToExercise(row)
-      if (!local || remote.updatedAt >= local.updatedAt) {
-        await db.exercises.put(remote)
-        pulled += 1
-      }
-    }
+  for (const row of (data ?? []) as Row[]) {
+    const res = await e.applyRemote(row)
+    if (res === 'pulled') pulled += 1
+    if (res === 'deleted') deleted += 1
   }
   return { pulled, deleted }
+}
+
+async function resolveUserId(supabase: SupabaseClient, session?: Session | null): Promise<string> {
+  let userId = session?.user.id
+  if (!userId) {
+    const { data, error } = await supabase.auth.getSession()
+    if (error) throw error
+    userId = data.session?.user.id
+  }
+  if (!userId) throw new Error('Войдите в аккаунт для синхронизации')
+  return userId
 }
 
 /** Full sync: push local changes + tombstones, then pull remote. */
@@ -312,32 +348,21 @@ export async function runSync(session?: Session | null): Promise<SyncResult> {
   emit('syncing')
 
   try {
-    let userId = session?.user.id
-    if (!userId) {
-      const { data, error } = await supabase.auth.getSession()
-      if (error) throw error
-      userId = data.session?.user.id
-    }
-    if (!userId) throw new Error('Войдите в аккаунт для синхронизации')
-
+    const userId = await resolveUserId(supabase, session)
     const since = getLastSyncedAt()
     const syncStarted = Date.now()
 
-    let pushed = 0
-    pushed += await pushTombstones(supabase, userId)
-    pushed += await pushTable(supabase, userId, 'clients', since)
-    pushed += await pushTable(supabase, userId, 'workouts', since)
-    pushed += await pushTable(supabase, userId, 'exercises', since)
-
+    const pushed = await pushPending(supabase, userId, since)
     let pulled = 0
     let deleted = 0
-    for (const table of ['clients', 'workouts', 'exercises'] as SyncEntity[]) {
-      const res = await pullTable(supabase, table, since)
+    for (const e of ENTITIES) {
+      const res = await pullEntity(supabase, e, since)
       pulled += res.pulled
       deleted += res.deleted
     }
 
     setLastSyncedAt(syncStarted)
+    if (pulled) await normalizeLocalData()
     emit('ok')
     return { pushed, pulled, deleted }
   } catch (err) {
@@ -349,45 +374,63 @@ export async function runSync(session?: Session | null): Promise<SyncResult> {
   }
 }
 
-/** Upload every local row (used on first login when cloud is empty). */
-export async function pushAllLocal(session: Session): Promise<number> {
-  const supabase = getSupabase()
-  if (!supabase) throw new Error('Supabase не настроен')
-  const userId = session.user.id
-  const clients = (await db.clients.toArray()).map((c) => clientToRow(c, userId))
-  const workouts = (await db.workouts.toArray()).map((w) => workoutToRow(w, userId))
-  const exercises = (await db.exercises.toArray()).map((e) => exerciseToRow(e, userId))
-  if (clients.length) {
-    const { error } = await supabase.from('clients').upsert(clients, { onConflict: 'id' })
-    if (error) throw error
-  }
-  if (workouts.length) {
-    const { error } = await supabase.from('workouts').upsert(workouts, { onConflict: 'id' })
-    if (error) throw error
-  }
-  if (exercises.length) {
-    const { error } = await supabase.from('exercises').upsert(exercises, { onConflict: 'id' })
-    if (error) throw error
-  }
-  setLastSyncedAt(Date.now())
-  return clients.length + workouts.length + exercises.length
+/** Drop local user data so the UI cannot show stale IndexedDB data. */
+export async function clearLocalUserData(): Promise<void> {
+  await db.transaction('rw', db.clients, db.workouts, db.measurements, db.tombstones, async () => {
+    await db.clients.clear()
+    await db.workouts.clear()
+    await db.measurements.clear()
+    await db.tombstones.clear()
+  })
+  clearSyncMeta()
 }
 
-export async function countRemoteRows(session: Session): Promise<number> {
+/**
+ * Supabase is the single source of truth when the user is signed in.
+ * Local edits made since the last sync (e.g. offline at the gym) are pushed first,
+ * then local data is replaced with the cloud snapshot (empty cloud → empty app).
+ */
+export async function hydrateFromRemote(
+  session: Session,
+): Promise<{ clients: number; workouts: number; exercises: number; measurements: number }> {
+  if (!navigator.onLine) throw new Error('Нет сети')
   const supabase = getSupabase()
-  if (!supabase) return 0
-  const userId = session.user.id
-  let total = 0
-  for (const table of ['clients', 'workouts', 'exercises'] as const) {
-    const { count, error } = await supabase
-      .from(table)
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .is('deleted_at', null)
-    if (error) throw error
-    total += count ?? 0
+  if (!supabase) throw new Error('Supabase не настроен')
+
+  const empty = { clients: 0, workouts: 0, exercises: 0, measurements: 0 }
+  if (syncing) return empty
+  syncing = true
+  emit('syncing')
+
+  try {
+    const userId = session.user.id
+    const since = getLastSyncedAt()
+    if (since > 0) await pushPending(supabase, userId, since)
+
+    const snapshot = await Promise.all(ENTITIES.map((e) => e.fetchAll(supabase, userId)))
+    const counts = { ...empty }
+    await db.transaction('rw', [db.tombstones, ...ENTITIES.map((e) => e.table)], async () => {
+      await db.tombstones.clear()
+      for (const [i, e] of ENTITIES.entries()) {
+        const rows = snapshot[i] ?? []
+        counts[e.name] = rows.length
+        // Exercise library: cloud wins when it has rows; otherwise keep local defaults.
+        if (e.name === 'exercises' && !rows.length) continue
+        await e.replaceAll(rows)
+      }
+    })
+
+    setLastSyncedAt(Date.now())
+    await normalizeLocalData()
+    emit('ok')
+    return counts
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Ошибка загрузки из облака'
+    emit('error', message)
+    throw err instanceof Error ? err : new Error(message)
+  } finally {
+    syncing = false
   }
-  return total
 }
 
 /** Debounced sync after local writes. */
@@ -420,18 +463,10 @@ export function installSyncHooks() {
   if (hooksInstalled) return
   hooksInstalled = true
   const bump = () => scheduleSync()
-  db.clients.hook('creating', bump)
-  db.clients.hook('updating', bump)
-  db.clients.hook('deleting', bump)
-  db.workouts.hook('creating', bump)
-  db.workouts.hook('updating', bump)
-  db.workouts.hook('deleting', bump)
-  db.exercises.hook('creating', bump)
-  db.exercises.hook('updating', bump)
-  db.exercises.hook('deleting', bump)
+  for (const e of ENTITIES) {
+    e.table.hook('creating', bump)
+    e.table.hook('updating', bump)
+    e.table.hook('deleting', bump)
+  }
   db.tombstones.hook('creating', bump)
 }
-
-// silence unused helpers kept for potential ISO mapping
-void msToIso
-void rowUpdatedAt

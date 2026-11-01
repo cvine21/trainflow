@@ -82,6 +82,24 @@ export function formatDuration(sec: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
+/** Always "м:сс", so "0:45" can't be confused with minutes. */
+export function formatClock(sec: number): string {
+  const total = Math.max(0, Math.round(sec))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+/** Case, ё/е, hyphens and punctuation are ignored when comparing exercise names. */
+export function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[-–—_.,:;!?«»"'()/\\]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export function parseNumber(value: string): number | null {
   const normalized = value.replace(',', '.').replace(/\s/g, '')
   if (normalized === '') return null
@@ -89,14 +107,15 @@ export function parseNumber(value: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-/** Accepts plain seconds ("90") or "м:сс" ("1:30") and returns seconds. */
+/** Accepts plain seconds ("90") or minutes and seconds ("1:30", or "1,30" from a decimal keypad). */
 export function parseDuration(value: string): number | null {
   const v = value.trim()
   if (!v) return null
-  if (v.includes(':')) {
-    const [m, s] = v.split(':')
+  const sep = v.match(/[:,.]/)?.[0]
+  if (sep) {
+    const [m, s] = v.split(sep)
     const mm = parseNumber(m ?? '') ?? 0
-    const ss = parseNumber(s ?? '') ?? 0
+    const ss = parseNumber((s ?? '').padEnd(2, '0').slice(0, 2)) ?? 0
     return Math.round(mm * 60 + ss)
   }
   const n = parseNumber(v)

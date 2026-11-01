@@ -1,8 +1,8 @@
 import { Link } from 'react-router'
 import { ChevronRight, MessageSquareText } from 'lucide-react'
 import type { Workout } from '@/lib/db'
-import { countLabel, formatDate, formatNumber } from '@/lib/format'
-import { workoutTonnage } from '@/lib/workouts'
+import { countLabel } from '@/lib/format'
+import { allExercises, formatWhen, workoutPreview } from '@/lib/workouts'
 import { StatusBadge } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
 
@@ -13,9 +13,8 @@ interface WorkoutCardProps {
 }
 
 export function WorkoutCard({ workout, clientName, showStatus = true }: WorkoutCardProps) {
-  const tonnage = workoutTonnage(workout)
-  const names = workout.exercises.map((e) => e.name)
-  const preview = names.slice(0, 3).join(' · ') + (names.length > 3 ? ` +${names.length - 3}` : '')
+  const exerciseCount = allExercises(workout).length
+  const circuits = workout.blocks.filter((b) => b.format !== 'sets').length
 
   return (
     <Link
@@ -27,7 +26,7 @@ export function WorkoutCard({ workout, clientName, showStatus = true }: WorkoutC
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-          <span className="capitalize">{formatDate(workout.date)}</span>
+          <span className="first-letter:uppercase">{formatWhen(workout)}</span>
           {clientName && (
             <>
               <span aria-hidden>·</span>
@@ -39,12 +38,12 @@ export function WorkoutCard({ workout, clientName, showStatus = true }: WorkoutC
           <h3 className="truncate font-semibold">{workout.title || 'Тренировка'}</h3>
           {showStatus && <StatusBadge status={workout.status} date={workout.date} />}
         </div>
-        <p className="mt-1 truncate text-sm text-muted-foreground">
-          {names.length ? preview : 'Упражнения не добавлены'}
+        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+          {exerciseCount ? workoutPreview(workout) : 'Упражнения не добавлены'}
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          <span>{countLabel(workout.exercises.length, ['упражнение', 'упражнения', 'упражнений'])}</span>
-          {tonnage > 0 && <span>{formatNumber(tonnage)} кг тоннаж</span>}
+          <span>{countLabel(exerciseCount, ['упражнение', 'упражнения', 'упражнений'])}</span>
+          {circuits > 0 && <span>{countLabel(circuits, ['блок', 'блока', 'блоков'])}</span>}
           {workout.notes?.trim() && (
             <span className="inline-flex items-center gap-1">
               <MessageSquareText className="size-3.5" /> заметка

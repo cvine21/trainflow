@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { AlertTriangle, ChevronRight, Plus, Search, Sparkles, UserPlus, Users, X } from 'lucide-react'
+import { AlertTriangle, ChevronRight, CircleUser, Plus, Search, Sparkles, UserPlus, Users, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { db, type Workout } from '@/lib/db'
 import { formatDate, todayISO } from '@/lib/format'
+import { compareWorkouts, formatWhen } from '@/lib/workouts'
 import { loadDemoData } from '@/lib/demo'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
@@ -30,8 +31,8 @@ export function ClientsPage() {
     for (const w of workouts ?? []) {
       const m = map.get(w.clientId) ?? {}
       if (w.status === 'completed') {
-        if (!m.last || w.date > m.last.date) m.last = w
-      } else if (w.date >= today && (!m.next || w.date < m.next.date)) {
+        if (!m.last || compareWorkouts(w, m.last) > 0) m.last = w
+      } else if (w.date >= today && (!m.next || compareWorkouts(w, m.next) < 0)) {
         m.next = w
       }
       map.set(w.clientId, m)
@@ -61,13 +62,22 @@ export function ClientsPage() {
         title="Клиенты"
         subtitle={clients?.length ? `${clients.length} в базе` : undefined}
         actions={
-          <Link
-            to="/clients/new"
-            className={cn(buttonVariants({ size: 'icon-lg' }), 'rounded-full')}
-            aria-label="Добавить клиента"
-          >
-            <UserPlus className="size-5" />
-          </Link>
+          <>
+            <Link
+              to="/account"
+              className={cn(buttonVariants({ variant: 'ghost', size: 'icon-lg' }), 'rounded-full')}
+              aria-label="Аккаунт"
+            >
+              <CircleUser className="size-5" />
+            </Link>
+            <Link
+              to="/clients/new"
+              className={cn(buttonVariants({ size: 'icon-lg' }), 'rounded-full')}
+              aria-label="Добавить клиента"
+            >
+              <UserPlus className="size-5" />
+            </Link>
+          </>
         }
       />
 
@@ -150,14 +160,14 @@ export function ClientsPage() {
                 <div className="flex items-center gap-1.5">
                   <span className="truncate font-semibold">{client.name}</span>
                   {client.health?.trim() && (
-                    <AlertTriangle className="size-3.5 shrink-0 text-amber-500" aria-label="Есть ограничения" />
+                    <AlertTriangle className="size-3.5 shrink-0 text-amber-400" aria-label="Есть ограничения" />
                   )}
                 </div>
                 {client.goal && <p className="truncate text-sm text-muted-foreground">{client.goal}</p>}
                 <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
                   {m?.next && (
                     <span className="font-medium text-primary">
-                      Следующая: <span className="lowercase">{formatDate(m.next.date, { weekday: false })}</span>
+                      Следующая: <span className="lowercase">{formatWhen(m.next, { weekday: false })}</span>
                     </span>
                   )}
                   <span>

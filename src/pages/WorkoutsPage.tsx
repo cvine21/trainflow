@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { CalendarDays } from 'lucide-react'
 import { db, type Workout } from '@/lib/db'
 import { todayISO } from '@/lib/format'
+import { compareWorkouts } from '@/lib/workouts'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { WorkoutCard } from '@/components/WorkoutCard'
@@ -13,7 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 const RECENT_LIMIT = 30
 
 export function WorkoutsPage() {
-  const workouts = useLiveQuery(() => db.workouts.orderBy('date').toArray(), [])
+  const workouts = useLiveQuery(async () => (await db.workouts.toArray()).sort(compareWorkouts), [])
   const clients = useLiveQuery(() => db.clients.toArray(), [])
 
   const names = useMemo(() => new Map((clients ?? []).map((c) => [c.id, c.name])), [clients])

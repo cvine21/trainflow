@@ -6,9 +6,9 @@ export interface Client {
   name: string
   phone?: string
   birthDate?: string
-  /** Height in centimetres. */
+  /** Legacy: moved into measurements by normalizeLocalData. */
   heightCm?: number | null
-  /** Current body weight in kilograms. */
+  /** Legacy: moved into measurements by normalizeLocalData. */
   weightKg?: number | null
   goal?: string
   health?: string
@@ -17,24 +17,51 @@ export interface Client {
   updatedAt: number
 }
 
-export type Metric = 'reps' | 'weight' | 'time' | 'distance'
+export type Metric = 'reps' | 'weight' | 'band' | 'time' | 'distance' | 'calories'
 
 export interface WorkoutSet {
   id: string
   reps?: number | null
   weight?: number | null
+  /** Resistance band level, one of BAND_LEVELS. */
+  band?: string | null
   timeSec?: number | null
   distance?: number | null
-  done?: boolean
+  calories?: number | null
 }
 
 export interface WorkoutExercise {
   id: string
+  /** Library exercise; history and progress are matched by it. */
+  exerciseId?: string
   name: string
   metrics: Metric[]
   sets: WorkoutSet[]
   restSec?: number | null
   note?: string
+}
+
+export type BlockFormat = 'sets' | 'superset' | 'rounds' | 'emom' | 'amrap' | 'fortime'
+
+export interface BlockResult {
+  timeSec?: number | null
+  rounds?: number | null
+  reps?: number | null
+  note?: string
+}
+
+export interface WorkoutBlock {
+  id: string
+  format: BlockFormat
+  /** rounds, fortime */
+  rounds?: number | null
+  /** emom total, amrap cap, fortime cap */
+  durationSec?: number | null
+  /** emom interval */
+  intervalSec?: number | null
+  /** In circuit formats every exercise keeps a single prescription in sets[0]. */
+  exercises: WorkoutExercise[]
+  result?: BlockResult
 }
 
 export type WorkoutStatus = 'planned' | 'completed'
@@ -43,10 +70,29 @@ export interface Workout {
   id: string
   clientId: string
   date: string
+  /** 'HH:MM' */
+  time?: string
   title: string
   status: WorkoutStatus
-  exercises: WorkoutExercise[]
+  blocks: WorkoutBlock[]
   notes?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface Measurement {
+  id: string
+  clientId: string
+  date: string
+  weightKg?: number | null
+  heightCm?: number | null
+  chestCm?: number | null
+  waistCm?: number | null
+  hipsCm?: number | null
+  thighCm?: number | null
+  armCm?: number | null
+  bodyFatPct?: number | null
+  note?: string
   createdAt: number
   updatedAt: number
 }
@@ -60,7 +106,7 @@ export interface Exercise {
   updatedAt: number
 }
 
-export type SyncEntity = 'clients' | 'workouts' | 'exercises'
+export type SyncEntity = 'clients' | 'workouts' | 'exercises' | 'measurements'
 
 /** Local hard-delete marker so removals can be pushed to Supabase. */
 export interface Tombstone {
@@ -108,8 +154,8 @@ const DEFAULT_EXERCISES: Array<[string, string, Metric[]]> = [
   ['Скручивания', 'Кор', ['reps']],
   ['Подъём ног в висе', 'Кор', ['reps']],
   ['Русские скручивания', 'Кор', ['reps', 'weight']],
-  ['Гребной тренажёр', 'Кардио', ['distance', 'time']],
-  ['Велотренажёр (Assault bike)', 'Кардио', ['time']],
+  ['Гребной тренажёр', 'Кардио', ['calories']],
+  ['Велотренажёр (Assault bike)', 'Кардио', ['calories']],
   ['Скакалка', 'Кардио', ['reps', 'time']],
   ['Бег', 'Кардио', ['distance', 'time']],
   ['Махи гирей', 'Функциональные', ['reps', 'weight']],
@@ -126,10 +172,27 @@ const DEFAULT_EXERCISES: Array<[string, string, Metric[]]> = [
   ['Растяжка «90/90»', 'Мобильность', ['time']],
 ]
 
+/** Earlier defaults that should switch to calories, keyed by name. */
+const CARDIO_TO_CALORIES: Record<string, string> = {
+  'Гребной тренажёр': 'distance,time',
+  'Велотренажёр (Assault bike)': 'time',
+}
+
+/** Wraps the pre-blocks flat exercise list: every exercise becomes a straight-sets block. */
+export function legacyBlocks(exercises: unknown): WorkoutBlock[] {
+  if (!Array.isArray(exercises)) return []
+  return (exercises as WorkoutExercise[]).map((ex) => ({
+    id: uid(),
+    format: 'sets',
+    exercises: [{ ...ex, sets: (ex.sets ?? []).map(({ done: _done, ...s }: WorkoutSet & { done?: boolean }) => s) }],
+  }))
+}
+
 class CoachDB extends Dexie {
   clients!: EntityTable<Client, 'id'>
   workouts!: EntityTable<Workout, 'id'>
   exercises!: EntityTable<Exercise, 'id'>
+  measurements!: EntityTable<Measurement, 'id'>
   tombstones!: EntityTable<Tombstone, 'id'>
 
   constructor() {
@@ -152,6 +215,30 @@ class CoachDB extends Dexie {
           if (ex.updatedAt == null) ex.updatedAt = ex.createdAt ?? Date.now()
         })
       })
+    this.version(3)
+      .stores({
+        measurements: 'id, clientId, date, [clientId+date], updatedAt',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('workouts')
+          .toCollection()
+          .modify((w: Workout & { exercises?: unknown }) => {
+            if (!Array.isArray(w.blocks)) w.blocks = legacyBlocks(w.exercises)
+            delete w.exercises
+          })
+        const now = Date.now()
+        await tx
+          .table('exercises')
+          .toCollection()
+          .modify((ex: Exercise) => {
+            const old = CARDIO_TO_CALORIES[ex.name]
+            if (old && ex.metrics.join(',') === old) {
+              ex.metrics = ['calories']
+              ex.updatedAt = now
+            }
+          })
+      })
     this.on('populate', (tx) => {
       const now = Date.now()
       return tx.table('exercises').bulkAdd(
@@ -170,16 +257,19 @@ class CoachDB extends Dexie {
 
 export const db = new CoachDB()
 
-async function addTombstone(id: string, entity: SyncEntity, deletedAt = Date.now()) {
+export async function addTombstone(id: string, entity: SyncEntity, deletedAt = Date.now()) {
   await db.tombstones.put({ id, entity, deletedAt })
 }
 
 export async function deleteClientCascade(clientId: string) {
   const now = Date.now()
-  await db.transaction('rw', db.clients, db.workouts, db.tombstones, async () => {
+  await db.transaction('rw', db.clients, db.workouts, db.measurements, db.tombstones, async () => {
     const workoutIds = await db.workouts.where('clientId').equals(clientId).primaryKeys()
     for (const wid of workoutIds) await addTombstone(String(wid), 'workouts', now)
     await db.workouts.where('clientId').equals(clientId).delete()
+    const measurementIds = await db.measurements.where('clientId').equals(clientId).primaryKeys()
+    for (const mid of measurementIds) await addTombstone(String(mid), 'measurements', now)
+    await db.measurements.where('clientId').equals(clientId).delete()
     await addTombstone(clientId, 'clients', now)
     await db.clients.delete(clientId)
   })
@@ -201,18 +291,10 @@ export async function deleteExercise(exerciseId: string) {
   })
 }
 
-export async function ensureExerciseInLibrary(name: string, metrics: Metric[]) {
-  const trimmed = name.trim()
-  if (!trimmed) return
-  const existing = await db.exercises.where('name').equalsIgnoreCase(trimmed).first()
-  if (existing) return
+export async function deleteMeasurement(measurementId: string) {
   const now = Date.now()
-  await db.exercises.add({
-    id: uid(),
-    name: trimmed,
-    category: 'Другое',
-    metrics,
-    createdAt: now,
-    updatedAt: now,
+  await db.transaction('rw', db.measurements, db.tombstones, async () => {
+    await addTombstone(measurementId, 'measurements', now)
+    await db.measurements.delete(measurementId)
   })
 }

@@ -1,7 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase'
-import { clearSyncMeta, installSyncHooks, runSync, startSyncAutopilot } from '@/lib/sync'
+import {
+  clearLocalUserData,
+  clearSyncMeta,
+  hydrateFromRemote,
+  installSyncHooks,
+  runSync,
+  startSyncAutopilot,
+} from '@/lib/sync'
 
 interface AuthContextValue {
   configured: boolean
@@ -41,13 +48,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (cancelled) return
       setSession(data.session)
       setLoading(false)
-      if (data.session) void runSync(data.session).catch(() => {})
+      if (data.session) {
+        void hydrateFromRemote(data.session)
+          .then(() => runSync(data.session).catch(() => {}))
+          .catch(() => {})
+      }
     })
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
       setSession(next)
-      if (event === 'SIGNED_IN' && next) void runSync(next).catch(() => {})
-      if (event === 'SIGNED_OUT') clearSyncMeta()
+      if (event === 'SIGNED_IN' && next) {
+        void hydrateFromRemote(next)
+          .then(() => runSync(next).catch(() => {}))
+          .catch(() => {})
+      }
+      if (event === 'SIGNED_OUT') {
+        clearSyncMeta()
+        void clearLocalUserData()
+      }
     })
 
     const stop = startSyncAutopilot(() => sessionRef.current)
@@ -63,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!supabase) throw new Error('Supabase не настроен')
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: `${window.location.origin}/data` },
+      options: { emailRedirectTo: `${window.location.origin}/account` },
     })
     if (error) throw error
   }, [])
@@ -73,7 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!supabase) return
     const { error } = await supabase.auth.signOut()
     if (error) throw error
-    clearSyncMeta()
+    await clearLocalUserData()
     setSession(null)
   }, [])
 

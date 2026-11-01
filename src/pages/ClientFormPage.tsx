@@ -4,7 +4,6 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Trash2, UserX } from 'lucide-react'
 import { toast } from 'sonner'
 import { db, deleteClientCascade, type Client } from '@/lib/db'
-import { parseNumber } from '@/lib/format'
 import { uid } from '@/lib/id'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
@@ -19,8 +18,6 @@ type FormState = {
   name: string
   phone: string
   birthDate: string
-  heightCm: string
-  weightKg: string
   goal: string
   health: string
   notes: string
@@ -30,15 +27,9 @@ const EMPTY: FormState = {
   name: '',
   phone: '',
   birthDate: '',
-  heightCm: '',
-  weightKg: '',
   goal: '',
   health: '',
   notes: '',
-}
-
-function numToText(value: number | null | undefined): string {
-  return value == null ? '' : String(value).replace('.', ',')
 }
 
 export function ClientFormPage() {
@@ -79,8 +70,6 @@ function ClientForm({ existing }: { existing: Client | null }) {
           name: existing.name,
           phone: existing.phone ?? '',
           birthDate: existing.birthDate ?? '',
-          heightCm: numToText(existing.heightCm),
-          weightKg: numToText(existing.weightKg),
           goal: existing.goal ?? '',
           health: existing.health ?? '',
           notes: existing.notes ?? '',
@@ -107,8 +96,6 @@ function ClientForm({ existing }: { existing: Client | null }) {
       name,
       phone: form.phone.trim() || undefined,
       birthDate: form.birthDate || undefined,
-      heightCm: parseNumber(form.heightCm),
-      weightKg: parseNumber(form.weightKg),
       goal: form.goal.trim() || undefined,
       health: form.health.trim() || undefined,
       notes: form.notes.trim() || undefined,
@@ -158,28 +145,6 @@ function ClientForm({ existing }: { existing: Client | null }) {
             </Field>
             <Field label="Дата рождения" htmlFor="birthDate">
               <Input id="birthDate" type="date" value={form.birthDate} onChange={set('birthDate')} className="h-11" />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Рост, см" htmlFor="heightCm">
-              <Input
-                id="heightCm"
-                inputMode="decimal"
-                value={form.heightCm}
-                onChange={set('heightCm')}
-                placeholder="170"
-                className="h-11"
-              />
-            </Field>
-            <Field label="Вес, кг" htmlFor="weightKg">
-              <Input
-                id="weightKg"
-                inputMode="decimal"
-                value={form.weightKg}
-                onChange={set('weightKg')}
-                placeholder="65"
-                className="h-11"
-              />
             </Field>
           </div>
           <Field label="Цель тренировок" htmlFor="goal">

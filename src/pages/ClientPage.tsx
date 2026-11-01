@@ -4,25 +4,31 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import {
   AlertTriangle,
   CalendarPlus,
+  ChevronRight,
   ClipboardList,
   History,
   MoreVertical,
   Pencil,
   Phone,
+  Plus,
   Target,
   Trash2,
   TrendingUp,
   UserX,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { db, deleteClientCascade } from '@/lib/db'
+import { db, deleteClientCascade, type Measurement } from '@/lib/db'
 import { addDaysISO, ageFromBirthDate, countLabel, formatDate, formatNumber, todayISO } from '@/lib/format'
-import { exerciseStats } from '@/lib/workouts'
+import { MEASUREMENT_FIELDS, type MeasurementField } from '@/lib/measurements'
+import { compareWorkouts, exerciseProgress } from '@/lib/workouts'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { ClientAvatar } from '@/components/ClientAvatar'
 import { WorkoutCard } from '@/components/WorkoutCard'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { ClientMeasurements } from '@/components/ClientMeasurements'
+import { ExerciseProgressSheet } from '@/components/ExerciseProgressSheet'
+import { MeasurementSheet } from '@/components/MeasurementSheet'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -35,7 +41,16 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 
-type Tab = 'plan' | 'history' | 'progress'
+type Tab = 'plan' | 'history' | 'progress' | 'measurements'
+
+function latestValues(list: Measurement[], fromIndex: number): Partial<Record<MeasurementField, number>> {
+  const out: Partial<Record<MeasurementField, number>> = {}
+  for (const f of MEASUREMENT_FIELDS) {
+    const m = list.slice(fromIndex).find((x) => x[f.key] != null)
+    if (m) out[f.key] = m[f.key]!
+  }
+  return out
+}
 
 export function ClientPage() {
   const { clientId = '' } = useParams()
@@ -43,17 +58,26 @@ export function ClientPage() {
   const [params, setParams] = useSearchParams()
   const tab = (params.get('tab') as Tab) || 'plan'
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [progressKey, setProgressKey] = useState<string | null>(null)
+  const [measurementSheet, setMeasurementSheet] = useState<{ measurement: Measurement | null } | null>(null)
 
   const client = useLiveQuery(async () => (await db.clients.get(clientId)) ?? null, [clientId])
   const workouts = useLiveQuery(
     () => db.workouts.where('[clientId+date]').between([clientId, ''], [clientId, '\uffff']).toArray(),
     [clientId],
   )
+  const measurements = useLiveQuery(
+    async () =>
+      (await db.measurements.where('clientId').equals(clientId).toArray()).sort(
+        (a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt,
+      ),
+    [clientId],
+  )
 
   const { planned, history, stats, progress } = useMemo(() => {
     const list = workouts ?? []
-    const planned = list.filter((w) => w.status === 'planned').sort((a, b) => a.date.localeCompare(b.date))
-    const history = list.filter((w) => w.status === 'completed').sort((a, b) => b.date.localeCompare(a.date))
+    const planned = list.filter((w) => w.status === 'planned').sort(compareWorkouts)
+    const history = list.filter((w) => w.status === 'completed').sort((a, b) => compareWorkouts(b, a))
     const monthAgo = addDaysISO(todayISO(), -30)
     return {
       planned,
@@ -63,7 +87,7 @@ export function ClientPage() {
         month: history.filter((w) => w.date >= monthAgo).length,
         last: history[0]?.date,
       },
-      progress: exerciseStats(list),
+      progress: exerciseProgress(list),
     }
   }, [workouts])
 
@@ -87,6 +111,10 @@ export function ClientPage() {
 
   const age = ageFromBirthDate(client?.birthDate)
   const newWorkoutHref = `/clients/${clientId}/workouts/new`
+  const selectedProgress = progress.find((p) => p.key === progressKey) ?? null
+  const editingIndex = measurementSheet?.measurement
+    ? (measurements ?? []).findIndex((m) => m.id === measurementSheet.measurement!.id)
+    : -1
 
   return (
     <>
@@ -105,6 +133,9 @@ export function ClientPage() {
                 </DropdownMenuItem>
                 <DropdownMenuItem className="h-10" onClick={() => navigate(newWorkoutHref)}>
                   <CalendarPlus /> Новая тренировка
+                </DropdownMenuItem>
+                <DropdownMenuItem className="h-10" onClick={() => setMeasurementSheet({ measurement: null })}>
+                  <Plus /> Добавить замер
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className="h-10" variant="destructive" onClick={() => setConfirmDelete(true)}>
@@ -136,23 +167,6 @@ export function ClientPage() {
                 </div>
               </div>
             </div>
-
-            {(client.heightCm != null || client.weightKg != null) && (
-              <div className="mt-4 grid grid-cols-2 gap-2 text-center">
-                <div className="rounded-xl bg-muted/60 py-2.5">
-                  <div className="text-lg leading-6 font-semibold tabular-nums">
-                    {client.heightCm != null ? `${formatNumber(client.heightCm)} см` : '—'}
-                  </div>
-                  <div className="text-[11px] text-muted-foreground">рост</div>
-                </div>
-                <div className="rounded-xl bg-muted/60 py-2.5">
-                  <div className="text-lg leading-6 font-semibold tabular-nums">
-                    {client.weightKg != null ? `${formatNumber(client.weightKg)} кг` : '—'}
-                  </div>
-                  <div className="text-[11px] text-muted-foreground">вес</div>
-                </div>
-              </div>
-            )}
 
             {(client.goal || client.health || client.notes) && (
               <div className="mt-4 flex flex-col gap-3 text-sm">
@@ -190,14 +204,17 @@ export function ClientPage() {
 
         <Tabs value={tab} onValueChange={(v) => setParams({ tab: v as string }, { replace: true })}>
           <TabsList className="h-11! w-full rounded-xl">
-            <TabsTrigger value="plan" className="rounded-lg">
+            <TabsTrigger value="plan" className="rounded-lg px-1">
               План{planned.length > 0 && <CountPill n={planned.length} />}
             </TabsTrigger>
-            <TabsTrigger value="history" className="rounded-lg">
+            <TabsTrigger value="history" className="rounded-lg px-1">
               История{history.length > 0 && <CountPill n={history.length} />}
             </TabsTrigger>
-            <TabsTrigger value="progress" className="rounded-lg">
+            <TabsTrigger value="progress" className="rounded-lg px-1">
               Прогресс
+            </TabsTrigger>
+            <TabsTrigger value="measurements" className="rounded-lg px-1">
+              Замеры
             </TabsTrigger>
           </TabsList>
 
@@ -236,34 +253,52 @@ export function ClientPage() {
               <EmptyState
                 icon={TrendingUp}
                 title="Пока нечего сравнивать"
-                description="Здесь появятся лучшие результаты клиента по каждому упражнению."
+                description="Здесь появятся лучшие подходы и расчётный максимум по каждому упражнению."
                 className="py-8"
               />
             )}
             {progress.length > 0 && (
               <ul className="divide-y divide-border/70 overflow-hidden rounded-2xl border border-border/70 bg-card">
-                {progress.map((s) => (
-                  <li key={s.name} className="flex items-center gap-3 px-4 py-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium">{s.name}</div>
-                      <div className="truncate text-xs text-muted-foreground">
-                        Последний раз <span className="lowercase">{formatDate(s.lastDate, { weekday: false })}</span>:{' '}
-                        {s.lastSummary}
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      {s.maxWeight != null ? (
-                        <div className="text-sm font-semibold">{formatNumber(s.maxWeight)} кг</div>
-                      ) : s.maxReps != null ? (
-                        <div className="text-sm font-semibold">{formatNumber(s.maxReps)} повт.</div>
-                      ) : null}
-                      <div className="text-[11px] text-muted-foreground">
-                        {countLabel(s.count, ['раз', 'раза', 'раз'])}
-                      </div>
-                    </div>
-                  </li>
-                ))}
+                {progress.map((p) => {
+                  const last = p.sessions.at(-1)!
+                  return (
+                    <li key={p.key}>
+                      <button
+                        type="button"
+                        onClick={() => setProgressKey(p.key)}
+                        className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-muted/60"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-medium">{p.name}</div>
+                          <div className="truncate text-xs text-muted-foreground">
+                            <span className="lowercase">{formatDate(last.date, { weekday: false })}</span>:{' '}
+                            {last.summary} · {countLabel(p.sessions.length, ['раз', 'раза', 'раз'])}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <div className="text-sm font-semibold">{p.bestLabel}</div>
+                          {p.bestE1rm != null && (
+                            <div className="text-[11px] text-muted-foreground">
+                              ≈ 1ПМ {formatNumber(Math.round(p.bestE1rm))} кг
+                            </div>
+                          )}
+                        </div>
+                        <ChevronRight className="size-4 shrink-0 text-muted-foreground/60" />
+                      </button>
+                    </li>
+                  )
+                })}
               </ul>
+            )}
+          </TabsContent>
+
+          <TabsContent value="measurements" className="mt-1 flex flex-col gap-2">
+            {measurements === undefined && <ListSkeleton />}
+            {measurements && (
+              <ClientMeasurements
+                measurements={measurements}
+                onOpen={(measurement) => setMeasurementSheet({ measurement })}
+              />
             )}
           </TabsContent>
         </Tabs>
@@ -271,24 +306,44 @@ export function ClientPage() {
 
       {client && (
         <div className="pb-safe pointer-events-none fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-lg px-4">
-          <Link
-            to={newWorkoutHref}
-            className={cn(
-              buttonVariants({ size: 'lg' }),
-              'pointer-events-auto mb-4 h-12 w-full rounded-2xl text-base shadow-lg shadow-primary/25',
-            )}
-          >
-            <CalendarPlus className="size-5" /> Новая тренировка
-          </Link>
+          {tab === 'measurements' ? (
+            <Button
+              size="lg"
+              className="pointer-events-auto mb-4 h-12 w-full rounded-2xl text-base shadow-lg shadow-primary/25"
+              onClick={() => setMeasurementSheet({ measurement: null })}
+            >
+              <Plus className="size-5" /> Добавить замер
+            </Button>
+          ) : (
+            <Link
+              to={newWorkoutHref}
+              className={cn(
+                buttonVariants({ size: 'lg' }),
+                'pointer-events-auto mb-4 h-12 w-full rounded-2xl text-base shadow-lg shadow-primary/25',
+              )}
+            >
+              <CalendarPlus className="size-5" /> Новая тренировка
+            </Link>
+          )}
         </div>
       )}
+
+      <ExerciseProgressSheet progress={selectedProgress} onClose={() => setProgressKey(null)} />
+
+      <MeasurementSheet
+        open={measurementSheet !== null}
+        onOpenChange={(open) => !open && setMeasurementSheet(null)}
+        clientId={clientId}
+        measurement={measurementSheet?.measurement}
+        previous={latestValues(measurements ?? [], editingIndex >= 0 ? editingIndex + 1 : 0)}
+      />
 
       {client && (
         <ConfirmDialog
           open={confirmDelete}
           onOpenChange={setConfirmDelete}
           title={`Удалить ${client.name}?`}
-          description={`Будут удалены профиль и ${countLabel(workouts?.length ?? 0, ['тренировка', 'тренировки', 'тренировок'])}. Это действие нельзя отменить.`}
+          description={`Будут удалены профиль, ${countLabel(workouts?.length ?? 0, ['тренировка', 'тренировки', 'тренировок'])} и замеры. Это действие нельзя отменить.`}
           onConfirm={async () => {
             await deleteClientCascade(client.id)
             toast.success('Клиент удалён')
