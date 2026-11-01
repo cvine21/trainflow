@@ -128,16 +128,18 @@ export function ClientsPage() {
                 <Link to="/clients/new" className={cn(buttonVariants({ size: 'lg' }), 'h-11 px-5')}>
                   <Plus /> Добавить клиента
                 </Link>
-                <Button
-                  variant="ghost"
-                  className="text-muted-foreground"
-                  onClick={async () => {
-                    await loadDemoData()
-                    toast.success('Добавлены демо-клиенты с тренировками')
-                  }}
-                >
-                  <Sparkles /> Заполнить примером
-                </Button>
+                {import.meta.env.DEV && (
+                  <Button
+                    variant="ghost"
+                    className="text-muted-foreground"
+                    onClick={async () => {
+                      await loadDemoData()
+                      toast.success('Добавлены демо-клиенты с тренировками')
+                    }}
+                  >
+                    <Sparkles /> Заполнить примером
+                  </Button>
+                )}
               </>
             }
           />
