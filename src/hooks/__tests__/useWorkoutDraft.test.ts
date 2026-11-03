@@ -43,27 +43,26 @@ describe('useWorkoutDraft', () => {
     get.mockReturnValue(base)
   })
 
-  it('keeps edits local and autosaves after a short delay', async () => {
-    vi.useFakeTimers()
+  it('keeps edits local until save is called', async () => {
     const { result } = renderHook(() => useWorkoutDraft('w1'))
 
     act(() => {
       result.current.change((w) => ({ ...w, title: 'Силовая' }))
     })
     expect(result.current.workout?.title).toBe('Силовая')
-    expect(result.current.saveState).toBe('saving')
+    expect(result.current.dirty).toBe(true)
+    expect(result.current.saveState).toBe('dirty')
     expect(put).not.toHaveBeenCalled()
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(500)
+      await result.current.save()
     })
     expect(put).toHaveBeenCalled()
     expect(result.current.saveState).toBe('saved')
-    vi.useRealTimers()
+    expect(result.current.dirty).toBe(false)
   })
 
-  it('discard cancels a pending write', async () => {
-    vi.useFakeTimers()
+  it('discard drops unsaved edits without writing', async () => {
     const { result } = renderHook(() => useWorkoutDraft('w1'))
     act(() => {
       result.current.change((w) => ({ ...w, title: 'Черновик' }))
@@ -71,20 +70,18 @@ describe('useWorkoutDraft', () => {
     act(() => {
       result.current.discard()
     })
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(500)
-    })
     expect(put).not.toHaveBeenCalled()
-    vi.useRealTimers()
+    expect(result.current.dirty).toBe(false)
+    expect(result.current.workout?.title).toBe('План')
   })
 
-  it('flush writes immediately', async () => {
+  it('save writes the latest pending workout', async () => {
     const { result } = renderHook(() => useWorkoutDraft('w1'))
     act(() => {
       result.current.change((w) => ({ ...w, notes: 'пауза' }))
     })
     await act(async () => {
-      await result.current.flush()
+      await result.current.save()
     })
     await waitFor(() => expect(put).toHaveBeenCalled())
     expect(put.mock.calls.at(-1)?.[0]).toMatchObject({ notes: 'пауза', id: 'w1' })

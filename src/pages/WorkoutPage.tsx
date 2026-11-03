@@ -1,9 +1,18 @@
 import { Chip } from '@/components/Chip'
+import { ClientPicker } from '@/components/ClientPicker'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { EmptyState } from '@/components/EmptyState'
 import { ExercisePicker } from '@/components/ExercisePicker'
 import { PageHeader } from '@/components/PageHeader'
 import { StatusBadge } from '@/components/StatusBadge'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button, buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -18,8 +27,16 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { BlockCard } from '@/components/workout/BlockCard'
 import { BlockFormatSheet, type BlockParams } from '@/components/workout/BlockFormatSheet'
-import { useWorkoutDraft, type SaveState } from '@/hooks/useWorkoutDraft'
-import { db, deleteWorkout, type Exercise, type Workout, type WorkoutBlock, type WorkoutExercise } from '@/lib/db'
+import { useWorkoutDraft } from '@/hooks/useWorkoutDraft'
+import {
+  db,
+  deleteWorkout,
+  type Client,
+  type Exercise,
+  type Workout,
+  type WorkoutBlock,
+  type WorkoutExercise,
+} from '@/lib/db'
 import { addDaysISO, formatDateLong, todayISO } from '@/lib/format'
 import { uid } from '@/lib/id'
 import {
@@ -41,7 +58,6 @@ import {
   Dumbbell,
   FileQuestion,
   Layers,
-  LoaderCircle,
   MoreVertical,
   Pencil,
   Plus,
@@ -50,7 +66,7 @@ import {
   X,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
+import { Link, Navigate, useBlocker, useLocation, useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 
 const TITLE_SUGGESTIONS = ['Всё тело', 'Верх тела', 'Низ тела', 'Круговая', 'Кардио', 'Мобильность']
@@ -146,7 +162,7 @@ export function WorkoutPage() {
   const { workoutId = '' } = useParams()
   const navigate = useNavigate()
   const fresh = (useLocation().state as { fresh?: boolean } | null)?.fresh === true
-  const { workout, change, saveState, flush, discard } = useWorkoutDraft(workoutId)
+  const { workout, change, save, discard, saveState, dirty } = useWorkoutDraft(workoutId)
   const client = useLiveQuery(
     async () => (workout ? ((await db.clients.get(workout.clientId)) ?? null) : undefined),
     [workout?.clientId],
@@ -158,6 +174,10 @@ export function WorkoutPage() {
   if (picker && picker.kind !== pickerKind) setPickerKind(picker.kind)
   const [formatTarget, setFormatTarget] = useState<FormatTarget | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmComplete, setConfirmComplete] = useState(false)
+  const [repeatOpen, setRepeatOpen] = useState(false)
+  const leaveProceeding = useRef(false)
+  const blocker = useBlocker(dirty)
 
   useEffect(() => {
     if (!fresh) return
@@ -172,6 +192,15 @@ export function WorkoutPage() {
       }, 0)
     }
   }, [fresh, workoutId])
+
+  useEffect(() => {
+    if (!dirty) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [dirty])
 
   if (workout === null) {
     return (
@@ -270,17 +299,45 @@ export function WorkoutPage() {
     )
   }
 
-  function complete() {
-    change((w) => ({ ...w, status: 'completed' }))
-    setUnlocked(false)
-    toast.success('Тренировка проведена и сохранена в истории')
+  async function handleSave() {
+    await save()
+    toast.success('Сохранено')
   }
 
-  async function repeat() {
+  async function markCompleted() {
+    change((w) => ({ ...w, status: 'completed' }))
+    await save()
+    setUnlocked(false)
+    toast.success('Тренировка в истории')
+  }
+
+  async function returnToPlan() {
+    change((w) => ({ ...w, status: 'planned' }))
+    await save()
+    toast.success('Тренировка снова в плане')
+  }
+
+  async function leaveWithSave() {
+    leaveProceeding.current = true
+    await save()
+    toast.success('Сохранено')
+    blocker.proceed?.()
+  }
+
+  function leaveWithoutSave() {
+    leaveProceeding.current = true
+    discard()
+    blocker.proceed?.()
+  }
+
+  async function repeatFor(target: Client) {
     if (!workout) return
-    await flush()
-    const id = await duplicateWorkout(workout)
-    toast.success('Создана копия в плане — проверьте дату и веса')
+    if (dirty) await save()
+    const id = await duplicateWorkout(workout, { clientId: target.id })
+    const same = target.id === workout.clientId
+    toast.success(
+      same ? 'Создана копия в плане — проверьте дату и веса' : `Копия для ${target.name} — проверьте дату и веса`,
+    )
     navigate(`/workouts/${id}`)
   }
 
@@ -293,34 +350,29 @@ export function WorkoutPage() {
         subtitle={client?.name}
         backTo={backTo}
         actions={
-          <>
-            {editable && <SaveIndicator state={saveState} />}
-            <DropdownMenu>
-              <DropdownMenuTrigger render={<Button variant="ghost" size="icon-lg" aria-label="Действия" />}>
-                <MoreVertical className="size-5" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem className="h-10" onClick={repeat}>
-                  <Copy /> Повторить тренировку
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-lg" aria-label="Действия" />}>
+              <MoreVertical className="size-5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem className="h-10" onClick={() => setRepeatOpen(true)}>
+                <Copy /> Повторить тренировку
+              </DropdownMenuItem>
+              {isPlanned ? (
+                <DropdownMenuItem className="h-10" onClick={() => setConfirmComplete(true)}>
+                  <CheckCircle2 /> Перенести в историю
                 </DropdownMenuItem>
-                {!isPlanned && (
-                  <DropdownMenuItem
-                    className="h-10"
-                    onClick={() => {
-                      change((w) => ({ ...w, status: 'planned' }))
-                      toast.success('Тренировка возвращена в план')
-                    }}
-                  >
-                    <RotateCcw /> Вернуть в план
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="h-10" variant="destructive" onClick={() => setConfirmDelete(true)}>
-                  <Trash2 /> Удалить
+              ) : (
+                <DropdownMenuItem className="h-10" onClick={() => void returnToPlan()}>
+                  <RotateCcw /> Вернуть в план
                 </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="h-10" variant="destructive" onClick={() => setConfirmDelete(true)}>
+                <Trash2 /> Удалить
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         }
       />
 
@@ -507,24 +559,38 @@ export function WorkoutPage() {
       </div>
 
       <div className="pb-safe sticky bottom-0 z-20 mt-auto flex gap-2 border-t border-border/60 bg-background/90 px-4 pt-3 backdrop-blur-md">
-        {isPlanned ? (
-          <Button className="mb-3 h-12 flex-1 text-base" onClick={complete}>
-            <CheckCircle2 /> Провести
-          </Button>
+        {editable ? (
+          <>
+            {!isPlanned && (
+              <Button
+                type="button"
+                variant="outline"
+                className="mb-3 h-12 flex-1 text-base"
+                onClick={() => setUnlocked(false)}
+              >
+                <Check /> Готово
+              </Button>
+            )}
+            <Button
+              type="button"
+              className="mb-3 h-12 flex-[1.4] text-base"
+              disabled={!dirty || saveState === 'saving'}
+              onClick={() => void handleSave()}
+            >
+              Сохранить
+            </Button>
+          </>
         ) : (
           <>
-            <Button variant="outline" className="mb-3 h-12 flex-1 text-base" onClick={() => setUnlocked((v) => !v)}>
-              {unlocked ? (
-                <>
-                  <Check /> Готово
-                </>
-              ) : (
-                <>
-                  <Pencil /> Изменить
-                </>
-              )}
+            <Button
+              type="button"
+              variant="outline"
+              className="mb-3 h-12 flex-1 text-base"
+              onClick={() => setUnlocked(true)}
+            >
+              <Pencil /> Изменить
             </Button>
-            <Button className="mb-3 h-12 flex-[1.4] text-base" onClick={repeat}>
+            <Button type="button" className="mb-3 h-12 flex-[1.4] text-base" onClick={() => setRepeatOpen(true)}>
               <Copy /> Повторить
             </Button>
           </>
@@ -546,6 +612,24 @@ export function WorkoutPage() {
         onSave={handleFormat}
       />
 
+      <ClientPicker
+        open={repeatOpen}
+        onOpenChange={setRepeatOpen}
+        title="Кому назначить копию?"
+        currentClientId={workout.clientId}
+        onPick={(c) => void repeatFor(c)}
+      />
+
+      <ConfirmDialog
+        open={confirmComplete}
+        onOpenChange={setConfirmComplete}
+        title="Перенести в историю?"
+        description="Тренировка пропадёт из плана и появится в истории клиента как уже проведённая. Позже её можно вернуть в план."
+        confirmLabel="В историю"
+        destructive={false}
+        onConfirm={markCompleted}
+      />
+
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
@@ -558,20 +642,33 @@ export function WorkoutPage() {
           navigate(backTo, { replace: true })
         }}
       />
-    </>
-  )
-}
 
-function SaveIndicator({ state }: { state: SaveState }) {
-  if (state === 'idle') return null
-  return (
-    <span className="mr-1 inline-flex items-center gap-1 text-xs text-muted-foreground" aria-live="polite">
-      {state === 'saving' ? (
-        <LoaderCircle className="size-3.5 animate-spin" />
-      ) : (
-        <Check className="size-3.5 text-emerald-600" />
-      )}
-      {state === 'saving' ? 'Сохраняем' : 'Сохранено'}
-    </span>
+      <AlertDialog
+        open={blocker.state === 'blocked'}
+        onOpenChange={(open) => {
+          if (open) return
+          if (leaveProceeding.current) {
+            leaveProceeding.current = false
+            return
+          }
+          blocker.reset?.()
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Сохранить изменения?</AlertDialogTitle>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="sm:flex-col-reverse sm:items-stretch">
+            <AlertDialogCancel className="h-10">Отмена</AlertDialogCancel>
+            <Button type="button" variant="outline" className="h-10" onClick={leaveWithoutSave}>
+              Не сохранять
+            </Button>
+            <Button type="button" className="h-10" onClick={() => void leaveWithSave()}>
+              Сохранить
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }
