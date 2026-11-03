@@ -34,7 +34,7 @@
 2. В SQL Editor выполните [`supabase/migrations/20261101120000_init.sql`](supabase/migrations/20261101120000_init.sql).
 3. Скопируйте `.env.example` → `.env`, вставьте Project URL и anon key.
 4. Auth → URL Configuration: добавьте `http://localhost:4317/account` и URL прод-сайта в Redirect URLs.
-5. Перезапустите `npm run dev`. Войдите по email (magic link) на экране входа.
+5. Перезапустите `yarn dev`. Войдите по email и паролю на экране входа.
 
 ## Стек
 
@@ -43,8 +43,8 @@ Vite, React 19, TypeScript, Tailwind CSS v4, shadcn/ui (Base UI), React Router, 
 ## Запуск локально
 
 ```bash
-npm install
-npm run dev
+yarn
+yarn dev
 ```
 
 Приложение откроется на http://localhost:4317. Сервер слушает все интерфейсы, поэтому с телефона
@@ -53,15 +53,17 @@ npm run dev
 Сборка продакшен-версии:
 
 ```bash
-npm run build
-npm run preview
+yarn build
+yarn preview
 ```
 
 Проверки:
 
 ```bash
-npm run typecheck
-npm run lint
+yarn typecheck
+yarn lint
+yarn test
+yarn test:e2e
 ```
 
 ## Установка на телефон (офлайн)
@@ -69,7 +71,7 @@ npm run lint
 Приложение — PWA: после установки на экран «Домой» интерфейс кэшируется service worker’ом,
 а данные клиентов и тренировок уже лежат в IndexedDB на устройстве.
 
-1. Разместите сборку (`npm run build`) на **HTTPS** (локальный `http://192.168…` для офлайна
+1. Разместите сборку (`yarn build`) на **HTTPS** (локальный `http://192.168…` для офлайна
    на iPhone не подходит — Safari требует защищённый контекст для service worker).
 2. Один раз откройте сайт онлайн в Safari / Chrome, чтобы скачался кэш.
 3. Safari → «Поделиться» → «На экран „Домой“» (или «Установить приложение» в Chrome).

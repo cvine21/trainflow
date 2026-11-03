@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation } from 'react-router'
 import { CalendarDays, Dumbbell, Users } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
+import { canShowTabBar } from '@/lib/appNav'
 import { AuthGate } from '@/components/AuthGate'
 import { cn } from '@/lib/utils'
 
@@ -14,8 +15,15 @@ const TAB_PATHS = new Set(TABS.map((t) => t.to))
 
 export function AppLayout() {
   const { pathname } = useLocation()
-  const { configured, user } = useAuth()
-  const showNav = TAB_PATHS.has(pathname) && (!configured || !!user)
+  const { configured, loading, user } = useAuth()
+  const showNav = canShowTabBar({
+    pathname,
+    tabPaths: TAB_PATHS,
+    configured,
+    loading,
+    signedIn: !!user,
+  })
+
 
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col bg-background sm:border-x sm:border-border/60 sm:shadow-sm">

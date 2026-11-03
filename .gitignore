@@ -26,3 +26,8 @@ yarn-debug.log*
 yarn-error.log*
 .vercel
 .env*
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+coverage

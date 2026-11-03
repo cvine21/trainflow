@@ -1,10 +1,10 @@
-import { useState, type FormEvent } from 'react'
-import { LoaderCircle, LogIn, UserPlus } from 'lucide-react'
-import { toast } from 'sonner'
-import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useAuth } from '@/lib/auth'
+import { Eye, EyeOff, LoaderCircle, LogIn, UserPlus } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
+import { toast } from 'sonner'
 
 /** When Supabase is configured, block the app until the user signs in. */
 export function AuthGate({ children }: { children: React.ReactNode }) {
@@ -12,6 +12,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [busy, setBusy] = useState(false)
 
   // Local dev: skip the login wall (keeps IndexedDB + avoids auth friction).
@@ -73,17 +74,27 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         </div>
         <div className="flex flex-col gap-1.5 text-left">
           <Label htmlFor="gate-password">Пароль</Label>
-          <Input
-            id="gate-password"
-            type="password"
-            autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Не меньше 6 символов"
-            className="h-11"
-            minLength={6}
-            required
-          />
+          <div className="relative">
+            <Input
+              id="gate-password"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Не меньше 6 символов"
+              className="h-11 pr-11"
+              minLength={6}
+              required
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              className="absolute top-1/2 right-1.5 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground active:bg-muted"
+              aria-label={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
+            >
+              {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          </div>
         </div>
         <Button type="submit" className="h-12 text-base" disabled={busy || !navigator.onLine}>
           {busy ? (

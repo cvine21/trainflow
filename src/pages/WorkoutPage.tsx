@@ -1,5 +1,37 @@
-import { useEffect, useRef, useState } from 'react'
-import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
+import { Chip } from '@/components/Chip'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { EmptyState } from '@/components/EmptyState'
+import { ExercisePicker } from '@/components/ExercisePicker'
+import { PageHeader } from '@/components/PageHeader'
+import { StatusBadge } from '@/components/StatusBadge'
+import { Button, buttonVariants } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
+import { BlockCard } from '@/components/workout/BlockCard'
+import { BlockFormatSheet, type BlockParams } from '@/components/workout/BlockFormatSheet'
+import { useWorkoutDraft, type SaveState } from '@/hooks/useWorkoutDraft'
+import { db, deleteWorkout, type Exercise, type Workout, type WorkoutBlock, type WorkoutExercise } from '@/lib/db'
+import { addDaysISO, formatDateLong, todayISO } from '@/lib/format'
+import { uid } from '@/lib/id'
+import {
+  changeBlockFormat,
+  createWorkout,
+  duplicateWorkout,
+  findLastPerformance,
+  isCircuit,
+  newBlock,
+  newExercise,
+  type LastPerformance,
+} from '@/lib/workouts'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   AlertTriangle,
@@ -17,41 +49,9 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
-import { db, deleteWorkout, type Exercise, type Workout, type WorkoutBlock, type WorkoutExercise } from '@/lib/db'
-import { addDaysISO, formatDateLong, todayISO } from '@/lib/format'
-import { uid } from '@/lib/id'
-import { useWorkoutDraft, type SaveState } from '@/lib/useWorkoutDraft'
-import {
-  changeBlockFormat,
-  createWorkout,
-  duplicateWorkout,
-  findLastPerformance,
-  isCircuit,
-  newBlock,
-  newExercise,
-  type LastPerformance,
-} from '@/lib/workouts'
-import { PageHeader } from '@/components/PageHeader'
-import { EmptyState } from '@/components/EmptyState'
-import { StatusBadge } from '@/components/StatusBadge'
-import { ConfirmDialog } from '@/components/ConfirmDialog'
-import { Chip } from '@/components/Chip'
-import { ExercisePicker } from '@/components/ExercisePicker'
-import { BlockCard } from '@/components/workout/BlockCard'
-import { BlockFormatSheet, type BlockParams } from '@/components/workout/BlockFormatSheet'
-import { Button, buttonVariants } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Textarea } from '@/components/ui/textarea'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 
 const TITLE_SUGGESTIONS = ['Всё тело', 'Верх тела', 'Низ тела', 'Круговая', 'Кардио', 'Мобильность']
 
