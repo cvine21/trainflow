@@ -37,7 +37,7 @@ import {
   type WorkoutBlock,
   type WorkoutExercise,
 } from '@/lib/db'
-import { addDaysISO, formatDateLong, todayISO } from '@/lib/format'
+import { addDaysISO, formatDateLong, parseISODate, todayISO } from '@/lib/format'
 import { uid } from '@/lib/id'
 import {
   changeBlockFormat,
@@ -53,6 +53,7 @@ import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   AlertTriangle,
+  Calendar,
   Check,
   CheckCircle2,
   Copy,
@@ -82,6 +83,12 @@ const PICKER_TITLE: Record<PickerTarget['kind'], string> = {
   new: 'Добавить упражнение',
   add: 'Упражнение в блок',
   replace: 'Заменить упражнение',
+}
+
+function formatFieldDate(iso: string): string {
+  return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+    .format(parseISODate(iso))
+    .replace(/\s*г\.?$/, '')
 }
 
 function isEmptyDraft(w: Workout): boolean {
@@ -417,13 +424,19 @@ export function WorkoutPage() {
             <div className={styles.dateTime}>
               <div className={styles.dateCell}>
                 <Label htmlFor="date">Дата</Label>
-                <Input
-                  id="date"
-                  type="date"
-                  value={workout.date}
-                  onChange={(e) => e.target.value && change((w) => ({ ...w, date: e.target.value }))}
-                  className={styles.dateInput}
-                />
+                <div className={styles.dateField}>
+                  <span className={styles.dateValue} aria-hidden="true">
+                    {formatFieldDate(workout.date)}
+                  </span>
+                  <Calendar className={styles.dateIcon} aria-hidden="true" />
+                  <Input
+                    id="date"
+                    type="date"
+                    value={workout.date}
+                    onChange={(e) => e.target.value && change((w) => ({ ...w, date: e.target.value }))}
+                    className={styles.dateInput}
+                  />
+                </div>
               </div>
               <div className={styles.timeCell}>
                 <Label htmlFor="time">Время</Label>
