@@ -426,10 +426,6 @@ export function WorkoutPage() {
               <div className={styles.dateCell}>
                 <Label htmlFor="date">Дата</Label>
                 <div className={styles.dateField}>
-                  <span className={styles.dateValue} aria-hidden="true">
-                    {formatFieldDate(workout.date)}
-                  </span>
-                  <Calendar className={styles.dateIcon} aria-hidden="true" />
                   <Input
                     id="date"
                     type="date"
@@ -437,26 +433,17 @@ export function WorkoutPage() {
                     onChange={(e) => e.target.value && change((w) => ({ ...w, date: e.target.value }))}
                     className={styles.dateInput}
                   />
+                  <div className={styles.dateFace}>
+                    <span className={styles.dateValue} aria-hidden="true">
+                      {formatFieldDate(workout.date)}
+                    </span>
+                    <Calendar className={styles.dateIcon} aria-hidden="true" />
+                  </div>
                 </div>
               </div>
               <div className={styles.timeCell}>
                 <Label htmlFor="time">Время</Label>
                 <div className={styles.dateField}>
-                  <span className={clsx(styles.dateValue, !workout.time && styles.timePlaceholder)} aria-hidden="true">
-                    {workout.time || '––:––'}
-                  </span>
-                  {workout.time ? (
-                    <button
-                      type="button"
-                      onClick={() => change((w) => ({ ...w, time: '' }))}
-                      className={styles.clearTime}
-                      aria-label="Убрать время"
-                    >
-                      <X className={styles.icon} />
-                    </button>
-                  ) : (
-                    <Clock className={styles.dateIcon} aria-hidden="true" />
-                  )}
                   <Input
                     id="time"
                     type="time"
@@ -464,6 +451,23 @@ export function WorkoutPage() {
                     onChange={(e) => change((w) => ({ ...w, time: e.target.value }))}
                     className={styles.dateInput}
                   />
+                  <div className={styles.dateFace}>
+                    <span className={clsx(styles.dateValue, !workout.time && styles.timePlaceholder)} aria-hidden="true">
+                      {workout.time || '––:––'}
+                    </span>
+                    {workout.time ? (
+                      <button
+                        type="button"
+                        onClick={() => change((w) => ({ ...w, time: '' }))}
+                        className={styles.clearTime}
+                        aria-label="Убрать время"
+                      >
+                        <X className={styles.icon} />
+                      </button>
+                    ) : (
+                      <Clock className={styles.dateIcon} aria-hidden="true" />
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

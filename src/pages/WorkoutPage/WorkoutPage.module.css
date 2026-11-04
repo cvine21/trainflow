@@ -126,26 +126,33 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent);
 }
 
-.dateValue {
-  display: block;
-  overflow: hidden;
-  padding: 0 2.25rem 0 0.75rem;
-  font-size: 1rem;
-  line-height: 2.75rem;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.dateFace {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.75rem;
+  background: var(--card);
   pointer-events: none;
 }
 
+.dateValue {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 1rem;
+  line-height: 1.25;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .dateIcon {
-  position: absolute;
-  top: 50%;
-  right: 0.75rem;
   width: 1rem;
   height: 1rem;
+  flex-shrink: 0;
   color: var(--muted-foreground);
-  pointer-events: none;
-  transform: translateY(-50%);
 }
 
 .timePlaceholder {
@@ -161,25 +168,34 @@
   min-width: 0;
   margin: 0;
   border: 0;
+  color: transparent;
+  background: transparent;
+  caret-color: transparent;
+  -webkit-text-fill-color: transparent;
   opacity: 0;
 }
 
+.dateInput::-webkit-datetime-edit,
+.dateInput::-webkit-datetime-edit-fields-wrapper,
+.dateInput::-webkit-date-and-time-value {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
 .clearTime {
-  position: absolute;
-  z-index: 2;
-  top: 50%;
-  right: 0.25rem;
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   width: 1.75rem;
   height: 1.75rem;
+  margin-right: -0.375rem;
   padding: 0;
   border: 0;
   border-radius: 999px;
-  background: var(--card);
+  background: transparent;
   color: var(--muted-foreground);
-  transform: translateY(-50%);
+  pointer-events: auto;
   cursor: pointer;
 }
 
