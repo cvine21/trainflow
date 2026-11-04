@@ -1,5 +1,15 @@
-.roundIcon {
+.account {
   border-radius: 999px;
+  background: var(--card);
+  color: var(--foreground);
+  text-decoration: none;
+}
+
+.add {
+  height: 2.25rem;
+  padding-inline: 0.875rem;
+  border-radius: 999px;
+  font-weight: 600;
   text-decoration: none;
 }
 

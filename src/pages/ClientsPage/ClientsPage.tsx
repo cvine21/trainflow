@@ -10,7 +10,7 @@ import { formatDate, todayISO } from '@/lib/format'
 import { compareWorkouts, formatWhen } from '@/lib/workouts'
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { AlertTriangle, ChevronRight, CircleUser, Plus, Search, Sparkles, UserPlus, Users, X } from 'lucide-react'
+import { AlertTriangle, ChevronRight, CircleUser, Plus, Search, Sparkles, Users, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
@@ -66,17 +66,18 @@ export function ClientsPage() {
           <>
             <Link
               to="/account"
-              className={clsx(buttonVariants({ variant: 'ghost', size: 'icon-lg' }), styles.roundIcon)}
+              className={clsx(buttonVariants({ variant: 'outline', size: 'icon-lg' }), styles.account)}
               aria-label="Аккаунт"
             >
               <CircleUser className={styles.iconMd} />
             </Link>
             <Link
               to="/clients/new"
-              className={clsx(buttonVariants({ size: 'icon-lg' }), styles.roundIcon)}
+              className={clsx(buttonVariants({ size: 'lg' }), styles.add)}
               aria-label="Добавить клиента"
             >
-              <UserPlus className={styles.iconMd} />
+              <Plus />
+              Добавить
             </Link>
           </>
         }
