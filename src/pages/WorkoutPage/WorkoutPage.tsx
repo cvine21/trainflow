@@ -55,6 +55,7 @@ import {
   AlertTriangle,
   Calendar,
   Check,
+  Clock,
   CheckCircle2,
   Copy,
   Dumbbell,
@@ -440,15 +441,11 @@ export function WorkoutPage() {
               </div>
               <div className={styles.timeCell}>
                 <Label htmlFor="time">Время</Label>
-                <div className={styles.timeWrap}>
-                  <Input
-                    id="time"
-                    type="time"
-                    value={workout.time ?? ''}
-                    onChange={(e) => change((w) => ({ ...w, time: e.target.value }))}
-                    className={styles.timeInput}
-                  />
-                  {workout.time && (
+                <div className={styles.dateField}>
+                  <span className={clsx(styles.dateValue, !workout.time && styles.timePlaceholder)} aria-hidden="true">
+                    {workout.time || '––:––'}
+                  </span>
+                  {workout.time ? (
                     <button
                       type="button"
                       onClick={() => change((w) => ({ ...w, time: '' }))}
@@ -457,7 +454,16 @@ export function WorkoutPage() {
                     >
                       <X className={styles.icon} />
                     </button>
+                  ) : (
+                    <Clock className={styles.dateIcon} aria-hidden="true" />
                   )}
+                  <Input
+                    id="time"
+                    type="time"
+                    value={workout.time ?? ''}
+                    onChange={(e) => change((w) => ({ ...w, time: e.target.value }))}
+                    className={styles.dateInput}
+                  />
                 </div>
               </div>
             </div>
