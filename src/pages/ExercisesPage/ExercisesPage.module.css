@@ -1,0 +1,209 @@
+.roundIcon {
+  border-radius: 999px;
+}
+
+.searchWrap {
+  padding: 0.75rem 1rem 0;
+}
+
+.search {
+  position: relative;
+}
+
+.searchIcon {
+  position: absolute;
+  top: 50%;
+  left: 0.75rem;
+  width: 1rem;
+  height: 1rem;
+  color: var(--muted-foreground);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.searchInput {
+  height: 2.75rem;
+  border-radius: var(--radius-xl);
+  background: var(--card);
+  padding-left: 2.25rem;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1rem;
+}
+
+.skeleton {
+  height: 10rem;
+  border-radius: var(--radius-2xl);
+}
+
+.category {
+  margin-bottom: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: var(--radius-2xl);
+  background: var(--card);
+}
+
+.list > * + * {
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:active {
+  background: color-mix(in srgb, var(--muted) 60%, transparent);
+}
+
+.rowBody {
+  min-width: 0;
+  flex: 1;
+}
+
+.rowName {
+  display: block;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.chevron {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--muted-foreground) 60%, transparent);
+}
+
+.icon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.iconMd {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
+.dialog {
+  top: 8%;
+  max-height: 84dvh;
+  overflow-y: auto;
+  transform: translate(-50%, 0);
+}
+
+.dialog[data-starting-style],
+.dialog[data-ending-style] {
+  transform: translate(-50%, 0) scale(0.95);
+}
+
+@media (min-width: 640px) {
+  .dialog {
+    top: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  .dialog[data-starting-style],
+  .dialog[data-ending-style] {
+    transform: translate(-50%, -50%) scale(0.95);
+  }
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.dialogTitle {
+  font-size: 1.125rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.control {
+  height: 2.75rem;
+}
+
+.error {
+  color: var(--destructive);
+  font-size: 0.75rem;
+}
+
+.hint {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.chip {
+  height: 2rem;
+  font-size: 0.75rem;
+}
+
+.merge {
+  height: 2.75rem;
+  justify-content: flex-start;
+  gap: 0.5rem;
+}
+
+.footer {
+  gap: 0.5rem;
+}
+
+.deleteButton {
+  height: 2.75rem;
+}
+
+.submit {
+  height: 2.75rem;
+}
+
+@media (min-width: 640px) {
+  .deleteButton {
+    margin-right: auto;
+  }
+}

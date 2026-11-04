@@ -1,0 +1,67 @@
+.chip {
+  flex-shrink: 0;
+  height: 2rem;
+  margin: 0;
+  padding: 0 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: color-mix(in srgb, var(--foreground) 80%, transparent);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  white-space: nowrap;
+  cursor: pointer;
+  appearance: none;
+  transition:
+    background-color 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+
+.chip:active {
+  background: var(--muted);
+}
+
+.chipActive,
+.chipActive:active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.segmented {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: var(--radius-xl);
+  background: var(--muted);
+}
+
+.segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  height: 2.25rem;
+  margin: 0;
+  padding: 0 0.5rem;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  cursor: pointer;
+  appearance: none;
+  transition:
+    background-color 0.15s,
+    color 0.15s,
+    box-shadow 0.15s;
+}
+
+.segmentActive {
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}

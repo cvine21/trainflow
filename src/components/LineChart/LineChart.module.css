@@ -1,0 +1,60 @@
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 7rem;
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--muted) 50%, transparent);
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  text-align: center;
+}
+
+.emptyValue {
+  color: var(--foreground);
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 2rem;
+}
+
+.chart {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.grid {
+  stroke: var(--border);
+}
+
+.tick {
+  fill: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.line {
+  stroke: var(--primary);
+}
+
+.dot {
+  fill: var(--card);
+  stroke: var(--primary);
+}
+
+.dotLast {
+  fill: var(--primary);
+  stroke: var(--card);
+}
+
+.value {
+  fill: var(--foreground);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.axis {
+  fill: var(--muted-foreground);
+  font-size: 10px;
+}

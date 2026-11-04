@@ -1,0 +1,47 @@
+.root {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+}
+
+.red {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.sky {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.emerald {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.violet {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.rose {
+  background: #ffe4e6;
+  color: #be123c;
+}
+
+.amber {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.teal {
+  background: #ccfbf1;
+  color: #0f766e;
+}

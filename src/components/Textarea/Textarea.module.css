@@ -1,0 +1,39 @@
+@layer components {
+  .textarea {
+    box-sizing: border-box;
+    display: flex;
+    width: 100%;
+    min-height: 4rem;
+    padding: 0.5rem 0.625rem;
+    border: 1px solid var(--input);
+    border-radius: var(--radius-lg);
+    background: transparent;
+    color: inherit;
+    font-size: 1rem;
+    field-sizing: content;
+    outline: none;
+    resize: vertical;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .textarea::placeholder {
+    color: var(--muted-foreground);
+  }
+
+  .textarea:focus-visible {
+    border-color: var(--ring);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent);
+  }
+
+  .textarea:disabled {
+    cursor: not-allowed;
+    background: color-mix(in srgb, var(--input) 50%, transparent);
+    opacity: 0.5;
+  }
+
+  @media (min-width: 768px) {
+    .textarea {
+      font-size: 0.875rem;
+    }
+  }
+}

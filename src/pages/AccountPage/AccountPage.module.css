@@ -1,0 +1,115 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.card {
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: var(--radius-2xl);
+  background: var(--card);
+  padding: 1rem;
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.cloud {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-xl);
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.accountBody {
+  min-width: 0;
+  flex: 1;
+}
+
+.email {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.rowButton {
+  height: 3rem;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  border-radius: var(--radius-xl);
+  background: var(--card);
+  padding-inline: 1rem;
+  font-size: 1rem;
+}
+
+.syncButton {
+  background: var(--background);
+}
+
+.signOut {
+  height: 2.75rem;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.heading {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+
+.file {
+  display: none;
+}
+
+.note {
+  padding-inline: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.iconMd {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
+.primary {
+  color: var(--primary);
+}
+
+.spin {
+  animation: global(spin) 1s linear infinite;
+}

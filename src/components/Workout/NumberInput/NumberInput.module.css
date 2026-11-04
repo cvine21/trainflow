@@ -1,0 +1,24 @@
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 2.5rem;
+  padding: 0;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  background: var(--background);
+  color: inherit;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  outline: none;
+}
+
+.input::placeholder {
+  color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
+}
+
+.input:focus-visible {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 40%, transparent);
+}

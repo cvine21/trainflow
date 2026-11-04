@@ -89,7 +89,7 @@ export function emptySet(): WorkoutSet {
 export function newExercise(
   source: Pick<Exercise, 'name' | 'metrics'> & { id?: string },
   sets?: WorkoutSet[],
-  setCount = 3,
+  setCount = 0,
 ): WorkoutExercise {
   return {
     id: uid(),

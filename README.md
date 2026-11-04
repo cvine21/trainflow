@@ -38,13 +38,13 @@
 
 ## Стек
 
-Vite, React 19, TypeScript, Tailwind CSS v4, shadcn/ui (Base UI), React Router, Dexie, Supabase.
+Vite, React 19, TypeScript, CSS Modules, Base UI, React Router, Dexie, Supabase.
 
 ## Запуск локально
 
 ```bash
 yarn
-yarn dev
+yarn start
 ```
 
 Приложение откроется на http://localhost:4317. Сервер слушает все интерфейсы, поэтому с телефона
