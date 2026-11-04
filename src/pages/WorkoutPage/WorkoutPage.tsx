@@ -433,7 +433,7 @@ export function WorkoutPage() {
                     type="time"
                     value={workout.time ?? ''}
                     onChange={(e) => change((w) => ({ ...w, time: e.target.value }))}
-                    className={styles.control}
+                    className={styles.timeInput}
                   />
                   {workout.time && (
                     <button

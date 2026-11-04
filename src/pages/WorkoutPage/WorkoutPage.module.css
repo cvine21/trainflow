@@ -95,35 +95,47 @@
 
 .dateTime {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 7.5rem;
-  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 7.5rem);
+  gap: 0.75rem;
 }
 
 .dateCell,
 .timeCell {
   display: flex;
   min-width: 0;
+  max-width: 100%;
   flex-direction: column;
   gap: 0.375rem;
-}
-
-.dateCell {
   overflow: hidden;
+  contain: inline-size;
 }
 
-.dateInput {
+.dateInput,
+.timeInput {
+  display: block;
+  width: 100%;
   height: 2.75rem;
+  min-width: 0;
   max-width: 100%;
-  min-width: 0;
-}
-
-.dateInput::-webkit-datetime-edit {
-  min-width: 0;
   overflow: hidden;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
-.dateInput::-webkit-datetime-edit-fields-wrapper {
+.dateInput::-webkit-datetime-edit,
+.timeInput::-webkit-datetime-edit,
+.dateInput::-webkit-datetime-edit-fields-wrapper,
+.timeInput::-webkit-datetime-edit-fields-wrapper,
+.dateInput::-webkit-date-and-time-value,
+.timeInput::-webkit-date-and-time-value {
+  display: block;
+  min-width: 0;
+  min-height: 1.25em;
   max-width: 100%;
+  overflow: hidden;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  text-align: start;
 }
 
 .timeWrap {
