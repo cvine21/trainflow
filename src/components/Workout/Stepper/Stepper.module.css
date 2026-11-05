@@ -71,36 +71,3 @@
   pointer-events: none;
   transform: translateY(-50%);
 }
-
-.bandValue {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  height: 2.75rem;
-  min-width: 0;
-  padding-inline: 0.5rem;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-lg);
-  background: var(--background);
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.swatch {
-  flex-shrink: 0;
-  width: 0.75rem;
-  height: 0.75rem;
-  border-radius: 999px;
-}
-
-.bandName {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bandEmpty {
-  color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
-}

@@ -1,1 +1,1 @@
-export { StepperRow, MetricStepper, BandStepper } from './Stepper'
+export { StepperRow } from './Stepper'

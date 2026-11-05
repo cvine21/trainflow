@@ -1,44 +1,119 @@
 import { Button } from '@/components/Button'
-import { BandStepper, MetricStepper } from '@/components/Workout/Stepper'
+import { NumberInput } from '@/components/Workout/NumberInput'
 import type { Metric, WorkoutSet } from '@/lib/db'
 import { plural } from '@/lib/format'
 import { uid } from '@/lib/id'
-import { emptySet, formatSet, formatSetGroup, getSetValue, groupSets, SET_FIELD, sortMetrics } from '@/lib/workouts'
+import {
+  BAND_COLORS,
+  BAND_LEVELS,
+  emptySet,
+  formatSet,
+  formatSetGroup,
+  getSetValue,
+  groupSets,
+  METRIC_LABELS,
+  SET_FIELD,
+  sortMetrics,
+} from '@/lib/workouts'
 import clsx from 'clsx'
-import { ChevronDown, Plus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { Check, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useState, type CSSProperties } from 'react'
 import styles from './SetList.module.css'
 
 const setsWord = (n: number) => `${n} ${plural(n, ['подход', 'подхода', 'подходов'])}`
 
-interface Row {
-  sets: WorkoutSet[]
-  open: boolean
+/** More metrics than this wrap onto a second line inside the set row. */
+const MAX_COLS = 3
+
+const HEADERS: Record<Metric, string> = {
+  reps: 'Повт.',
+  weight: 'Вес, кг',
+  band: 'Резина',
+  time: 'Время',
+  distance: 'Дист., м',
+  calories: 'Кал',
 }
 
-/** Collapsed rows stay grouped; an open panel keeps its set ids even when values diverge. */
-function rowsFor(sets: WorkoutSet[], metrics: Metric[], openIds: string[]): Row[] {
-  if (!openIds.length) return groupSets(sets, metrics).map((g) => ({ sets: g, open: false }))
+type SetUpdate = (update: (set: WorkoutSet) => WorkoutSet) => void
 
-  const openSets = sets.filter((s) => openIds.includes(s.id))
-  const rows: Row[] = []
-  let i = 0
-  let openEmitted = false
-  while (i < sets.length) {
-    if (openIds.includes(sets[i]!.id)) {
-      if (!openEmitted && openSets.length) {
-        rows.push({ sets: openSets, open: true })
-        openEmitted = true
-      }
-      i++
-      continue
-    }
-    let j = i
-    while (j < sets.length && !openIds.includes(sets[j]!.id)) j++
-    for (const g of groupSets(sets.slice(i, j), metrics)) rows.push({ sets: g, open: false })
-    i = j
+function BandSelect({
+  value,
+  label,
+  autoFocus,
+  onChange,
+}: {
+  value: string | null
+  label: string
+  autoFocus?: boolean
+  onChange: (value: string | null) => void
+}) {
+  return (
+    <div className={styles.band}>
+      {value && <span className={styles.swatch} style={{ background: BAND_COLORS[value] }} />}
+      <select
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value || null)}
+        aria-label={label}
+        autoFocus={autoFocus}
+        className={clsx(styles.select, value && styles.selectWithSwatch)}
+      >
+        <option value="">—</option>
+        {BAND_LEVELS.map((level) => (
+          <option key={level} value={level}>
+            {level}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+function Field({
+  metric,
+  set,
+  label,
+  caption,
+  autoFocus,
+  onUpdate,
+}: {
+  metric: Metric
+  set: WorkoutSet
+  label: string
+  caption?: string
+  autoFocus?: boolean
+  onUpdate: SetUpdate
+}) {
+  return (
+    <div className={styles.cell}>
+      {caption && <span className={styles.caption}>{caption}</span>}
+      {metric === 'band' ? (
+        <BandSelect
+          value={set.band ?? null}
+          label={label}
+          autoFocus={autoFocus}
+          onChange={(band) => onUpdate((s) => ({ ...s, band }))}
+        />
+      ) : (
+        <NumberInput
+          value={getSetValue(set, metric)}
+          onChange={(v) => onUpdate((s) => ({ ...s, [SET_FIELD[metric]]: v }))}
+          decimal={metric === 'weight' || metric === 'distance'}
+          duration={metric === 'time'}
+          placeholder={metric === 'time' ? '0:00' : '—'}
+          label={label}
+          autoFocus={autoFocus}
+          className={styles.input}
+        />
+      )}
+    </div>
+  )
+}
+
+function summarize(group: WorkoutSet[], metrics: Metric[], single?: string): string {
+  if (group.every((s) => formatSet(s, metrics) === '—')) {
+    return single ? 'Не задано' : `${setsWord(group.length)} без значений`
   }
-  return rows
+  return single ? formatSet(group[0]!, metrics) : formatSetGroup(group, metrics)
 }
 
 interface SetListProps {
@@ -51,112 +126,121 @@ interface SetListProps {
 }
 
 export function SetList({ sets, metrics, single, editable, onChange }: SetListProps) {
-  const [openIds, setOpenIds] = useState<string[]>([])
-  const open = openIds.filter((id) => sets.some((s) => s.id === id))
+  // Inputs stay hidden until the pencil of a set is pressed; one set is edited at a time.
+  const [editingId, setEditingId] = useState<string | null>(null)
   const sorted = sortMetrics(metrics)
-  const rows = rowsFor(sets, sorted, open)
+
+  if (!editable) {
+    return (
+      <div className={styles.list}>
+        {groupSets(sets, sorted).map((group) => {
+          const empty = group.every((s) => formatSet(s, sorted) === '—')
+          return (
+            <div key={group[0]!.id} className={styles.readonlyRow}>
+              {single && <span className={styles.singleLabel}>{single}</span>}
+              <span className={clsx(styles.summary, empty && styles.summaryMuted)}>
+                {summarize(group, sorted, single)}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  // 4 metrics read better as 2 + 2 than as 3 + 1.
+  const cols = sorted.length <= MAX_COLS ? sorted.length : sorted.length === 4 ? 2 : MAX_COLS
+  const style = { '--cols': cols } as CSSProperties
 
   const updateSet = (id: string, update: (set: WorkoutSet) => WorkoutSet) =>
     onChange(sets.map((s) => (s.id === id ? update(s) : s)))
 
   const removeSet = (id: string) => {
+    if (editingId === id) setEditingId(null)
     onChange(sets.filter((s) => s.id !== id))
-    setOpenIds((ids) => ids.filter((x) => x !== id))
   }
 
   const addSet = () => {
     const prev = sets.at(-1)
     const set = prev ? { ...prev, id: uid() } : emptySet()
     onChange([...sets, set])
-    setOpenIds([set.id])
+    setEditingId(set.id)
   }
 
   return (
-    <div className={styles.list}>
-      {rows.map((row) => {
-        const first = row.sets[0]!
-        const ids = row.sets.map((s) => s.id)
-        const empty = row.sets.every((s) => formatSet(s, sorted) === '—')
-        const formatted = row.sets.map((s) => formatSet(s, sorted))
-        const allSame = formatted.every((f) => f === formatted[0])
-        const summary = empty
-          ? single
-            ? 'Не задано'
-            : `${setsWord(row.sets.length)} без значений`
-          : single
-            ? formatted[0]!
-            : allSame
-              ? formatSetGroup(row.sets, sorted)
-              : formatted.join(', ')
-        const content = (
-          <>
-            {single && <span className={styles.singleLabel}>{single}</span>}
-            <span className={clsx(styles.summary, empty && styles.summaryMuted)}>{summary}</span>
-          </>
-        )
-
-        if (!editable)
-          return (
-            <div key={first.id} className={styles.readonlyRow}>
-              {content}
-            </div>
-          )
-
-        return (
-          <div key={first.id} className={clsx(styles.row, row.open && styles.rowOpen)}>
-            <button
-              type="button"
-              onClick={() => setOpenIds(row.open ? [] : ids)}
-              aria-expanded={row.open}
-              className={styles.toggle}
-            >
-              {content}
-              <ChevronDown className={clsx(styles.chevron, row.open && styles.chevronOpen)} />
-            </button>
-            {row.open && (
-              <div className={styles.panel}>
-                {row.sets.map((s) => {
-                  const index = sets.findIndex((x) => x.id === s.id)
-                  return (
-                    <div key={s.id} className={styles.setCard}>
+    <div className={styles.list} style={style}>
+      {sets.length > 0 && (
+        <div className={styles.rows}>
+          {single && <span className={styles.singleLabel}>{single}</span>}
+          {sets.map((s, i) => {
+            const editing = s.id === editingId
+            const n = i + 1
+            const text = formatSet(s, sorted)
+            return (
+              <div
+                key={s.id}
+                className={clsx(styles.row, single && styles.rowSingle, editing && styles.rowEditing)}
+              >
+                {!single && <span className={styles.index}>{n}</span>}
+                {editing ? (
+                  <>
+                    <div className={styles.fields}>
+                      {sorted.map((m, mi) => (
+                        <Field
+                          key={m}
+                          metric={m}
+                          set={s}
+                          label={single ? METRIC_LABELS[m].full : `${METRIC_LABELS[m].full}, подход ${n}`}
+                          caption={HEADERS[m]}
+                          autoFocus={mi === 0}
+                          onUpdate={(update) => updateSet(s.id, update)}
+                        />
+                      ))}
+                    </div>
+                    <div className={styles.actions}>
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(null)}
+                        className={clsx(styles.iconButton, styles.done)}
+                        aria-label={single ? 'Готово' : `Готово, подход ${n}`}
+                      >
+                        <Check className={styles.icon} />
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <span className={clsx(styles.summary, text === '—' && styles.summaryMuted)}>
+                      {text === '—' ? 'Не задано' : text}
+                    </span>
+                    <div className={styles.actions}>
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(s.id)}
+                        className={styles.iconButton}
+                        aria-label={single ? 'Изменить' : `Изменить подход ${n}`}
+                      >
+                        <Pencil className={styles.icon} />
+                      </button>
                       {!single && (
-                        <div className={styles.setHeader}>
-                          <span className={styles.setLabel}>Подход {index + 1}</span>
-                          <button
-                            type="button"
-                            onClick={() => removeSet(s.id)}
-                            className={styles.remove}
-                            aria-label={`Удалить подход ${index + 1}`}
-                          >
-                            <Trash2 className={styles.icon} />
-                          </button>
-                        </div>
-                      )}
-                      {sorted.map((m) =>
-                        m === 'band' ? (
-                          <BandStepper
-                            key={m}
-                            value={s.band ?? null}
-                            onChange={(band) => updateSet(s.id, (set) => ({ ...set, band }))}
-                          />
-                        ) : (
-                          <MetricStepper
-                            key={m}
-                            metric={m}
-                            value={getSetValue(s, m)}
-                            onChange={(v) => updateSet(s.id, (set) => ({ ...set, [SET_FIELD[m]]: v }))}
-                          />
-                        ),
+                        <button
+                          type="button"
+                          onClick={() => removeSet(s.id)}
+                          className={styles.iconButton}
+                          aria-label={`Удалить подход ${n}`}
+                        >
+                          <Trash2 className={styles.icon} />
+                        </button>
                       )}
                     </div>
-                  )
-                })}
+                  </>
+                )}
               </div>
-            )}
-          </div>
-        )
-      })}
-      {editable && !single && (
+            )
+          })}
+        </div>
+      )}
+      {!single && (
         <div className={styles.addWrap}>
           <Button type="button" variant="secondary" className={styles.addSet} onClick={addSet}>
             <Plus /> Подход
