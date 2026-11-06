@@ -68,6 +68,19 @@ yarn test:e2e
 
 Перед коммитом автоматически запускаются `yarn lint`, `yarn typecheck` и `yarn test`.
 
+## CI/CD
+
+Пайплайн — GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), запускается на каждый
+push в `main` и на pull request:
+
+1. **quality** — `yarn lint`, `yarn typecheck`, `yarn test`, `yarn build`.
+2. **e2e** — Playwright (Chromium, `yarn test:e2e`); отчёт и трейсы выгружаются артефактом `playwright-artifacts`.
+3. **deploy** — только для `main` и только после успешных quality и e2e: выкладка в Vercel (production).
+
+Для деплоя добавьте в Settings → Secrets and variables → Actions секреты `VERCEL_TOKEN`,
+`VERCEL_ORG_ID` и `VERCEL_PROJECT_ID` (значения ID — в `.vercel/project.json`). Без них шаг деплоя
+пропускается. Если в Vercel включена автодеплой-интеграция с Git, отключите её, чтобы не было двойного деплоя.
+
 ## Установка на телефон (офлайн)
 
 Приложение — PWA: после установки на экран «Домой» интерфейс кэшируется service worker’ом,
