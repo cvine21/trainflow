@@ -28,14 +28,6 @@
 только кэш для офлайна: при входе он полностью подменяется данными из Supabase (пустая таблица в облаке =
 пустой список клиентов в приложении). Без `.env` приложение работает только локально через Dexie/IndexedDB.
 
-### Настройка Supabase
-
-1. Создайте Free-проект на supabase.com.
-2. В SQL Editor выполните [`supabase/migrations/20261101120000_init.sql`](supabase/migrations/20261101120000_init.sql).
-3. Скопируйте `.env.example` → `.env`, вставьте Project URL и anon key.
-4. Auth → URL Configuration: добавьте `http://localhost:4317/account` и URL прод-сайта в Redirect URLs.
-5. Перезапустите `yarn dev`. Войдите по email и паролю на экране входа.
-
 ## Стек
 
 Vite, React 19, TypeScript, CSS Modules, Base UI, React Router, Dexie, Supabase.
