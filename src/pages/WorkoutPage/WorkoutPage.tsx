@@ -73,8 +73,6 @@ import { Link, Navigate, useBlocker, useLocation, useNavigate, useParams } from 
 import { toast } from 'sonner'
 import styles from './WorkoutPage.module.css'
 
-const TITLE_SUGGESTIONS = ['Всё тело', 'Верх тела', 'Низ тела', 'Круговая', 'Кардио', 'Мобильность']
-
 type PickerTarget =
   { kind: 'new' } | { kind: 'add'; blockId: string } | { kind: 'replace'; blockId: string; exerciseId: string }
 
@@ -409,18 +407,6 @@ export function WorkoutPage() {
                 placeholder="Например, Низ тела + кор"
                 className={styles.control}
               />
-              <div className={styles.suggestions}>
-                {TITLE_SUGGESTIONS.map((t) => (
-                  <Chip
-                    key={t}
-                    active={workout.title === t}
-                    onClick={() => change((w) => ({ ...w, title: t }))}
-                    className={styles.chipSm}
-                  >
-                    {t}
-                  </Chip>
-                ))}
-              </div>
             </div>
             <div className={styles.dateTime}>
               <div className={styles.dateCell}>
